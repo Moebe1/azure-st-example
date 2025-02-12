@@ -25,7 +25,7 @@ client = AzureOpenAI(
 )
 
 # =============================================================================
-# Function: get_openai_response (Non-Streaming)
+# Function: Non-Streaming Response
 # =============================================================================
 def get_openai_response(messages, model_name):
     """
@@ -44,7 +44,7 @@ def get_openai_response(messages, model_name):
         return None
 
 # =============================================================================
-# Function: get_openai_streaming_response
+# Function: Streaming Response
 # =============================================================================
 def get_openai_streaming_response(messages, model_name):
     """
@@ -126,13 +126,15 @@ def main():
                 # 2A) Iterate over chunks in the streaming response
                 for update in response_generator:
                     if update and hasattr(update, "choices") and update.choices:
-                        # The 'delta' is likely a ChoiceDelta object with .content
-                        chunk = update.choices[0].delta.content if update.choices[0].delta else ""
+                        # Safely handle the possibility that content can be None
+                        chunk = ""
+                        if update.choices[0].delta and hasattr(update.choices[0].delta, "content"):
+                            chunk = update.choices[0].delta.content or ""  # Convert None to empty string
+
                         assistant_text += chunk
-                        # Update UI in real-time
                         message_placeholder.write(assistant_text)
 
-                        # If usage is attached (often only on final chunk)
+                        # If usage is attached (often only on the final chunk)
                         if hasattr(update, "usage") and update.usage:
                             usage_info = update.usage
 
@@ -143,7 +145,8 @@ def main():
                     return  # If there's an error, stop here
 
                 # Extract assistant text from the response
-                assistant_text = response.choices[0].message.content if response.choices else ""
+                if response.choices and response.choices[0].message:
+                    assistant_text = response.choices[0].message.content or ""
                 usage_info = getattr(response, "usage", None)
                 # Immediately display the final text
                 message_placeholder.write(assistant_text)
