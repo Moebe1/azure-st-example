@@ -7,10 +7,16 @@ import re
 # =============================================================================
 AZURE_OPENAI_API_KEY = st.secrets["AZURE_OPENAI_API_KEY"]
 AZURE_OPENAI_ENDPOINT = st.secrets["AZURE_OPENAI_ENDPOINT"]
-AZURE_OPENAI_DEPLOYMENT = st.secrets["AZURE_OPENAI_DEPLOYMENT"]
 AZURE_OPENAI_API_VERSION = st.secrets["AZURE_OPENAI_API_VERSION"]
 
-# Create Azure OpenAI client
+# List of deployments you have in Azure OpenAI
+AVAILABLE_MODELS = [
+    "o1-mini",
+    "gpt-4o"
+    # Add or remove models here as needed
+]
+
+# Create an Azure OpenAI client (api_version applies to all deployments)
 client = AzureOpenAI(
     api_key=AZURE_OPENAI_API_KEY,
     azure_endpoint=AZURE_OPENAI_ENDPOINT,
@@ -20,14 +26,14 @@ client = AzureOpenAI(
 # =============================================================================
 # Function: Get response from Azure OpenAI
 # =============================================================================
-def get_openai_response(messages):
+def get_openai_response(messages, model_name):
     """
     Fetches a response from Azure OpenAI using the OpenAI Python library.
-    Expects messages to be a list of dicts, e.g. [{'role': 'user', 'content': 'Hello'}].
+    `model_name` must match one of your Azure deployment names.
     """
     try:
         response = client.chat.completions.create(
-            model=AZURE_OPENAI_DEPLOYMENT,  # "model" is used for Azure's new endpoint
+            model=model_name,
             messages=messages
         )
         return response.choices[0].message.content
@@ -42,47 +48,46 @@ def main():
     st.set_page_config(page_title="Azure OpenAI Chat", page_icon="💬")
     st.title("Azure OpenAI Chat Interface")
 
-    # Initialize conversation in session state
+    # Initialize session state for conversation
     if "messages" not in st.session_state:
-        # Provide a default greeting from the assistant
         st.session_state["messages"] = [
             {"role": "assistant", "content": "Hello! How can I help you today?"}
         ]
 
-    # Sidebar
+    # Sidebar: Model Selection + Clear Conversation
     with st.sidebar:
         st.header("Configuration")
         st.write("Ensure your Azure OpenAI API key and endpoint are correct.")
+        model_choice = st.selectbox("Select the Azure deployment:", AVAILABLE_MODELS, index=0)
+
         if st.button("Clear Conversation"):
             st.session_state["messages"] = [
                 {"role": "assistant", "content": "Conversation cleared. How can I help you now?"}
             ]
 
-    # Display the conversation so far
+    # Display existing conversation
     for msg in st.session_state["messages"]:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
 
     # Chat input box at the bottom
     if prompt := st.chat_input("Type your message here…"):
-        # 1) Append the user message to the conversation
+        # 1) Append user message to conversation
         st.session_state["messages"].append({"role": "user", "content": prompt})
-
-        # Display user message
         with st.chat_message("user"):
             st.write(prompt)
 
-        # 2) Get the assistant's response from Azure OpenAI
-        assistant_text = get_openai_response(st.session_state["messages"])
+        # 2) Get assistant response from the selected model
+        assistant_text = get_openai_response(st.session_state["messages"], model_choice)
         if assistant_text is None:
-            return  # No valid response, early exit
+            return
 
-        # Minimal trailing/leading whitespace cleanup
+        # Minimal whitespace cleanup
         assistant_text = re.sub(r'[ \t]+$', '', assistant_text, flags=re.MULTILINE)
         assistant_text = re.sub(r'^\s*\n', '', assistant_text)
         assistant_text = re.sub(r'\n\s*$', '', assistant_text)
 
-        # 3) Append the assistant message to the session and display
+        # 3) Append assistant message to conversation
         st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
         with st.chat_message("assistant"):
             st.write(assistant_text)
