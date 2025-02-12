@@ -25,19 +25,20 @@ client = AzureOpenAI(
 )
 
 # =============================================================================
-# Function: Get response from Azure OpenAI
+# Function: Get response from Azure OpenAI (Streaming)
 # =============================================================================
 def get_openai_response(messages, model_name):
     """
-    Fetches a response from Azure OpenAI using the OpenAI Python library.
-    Return the full response object so we can access 'usage' fields.
+    Fetches a response generator from Azure OpenAI using the OpenAI Python library.
+    We set stream=True so that we can iterate over the response in chunks.
     """
     try:
         response = client.chat.completions.create(
             model=model_name,
-            messages=messages
+            messages=messages,
+            stream=True
         )
-        return response
+        return response  # returns a generator
     except OpenAIError as e:
         st.error(f"OpenAI API Error: {str(e)}")
         return None
@@ -86,28 +87,44 @@ def main():
         with st.chat_message("user"):
             st.write(prompt)
 
-        # 2) Get assistant response from the selected model (full response object)
-        response = get_openai_response(st.session_state["messages"], model_choice)
-        if not response:
+        # 2) Request a streaming response from Azure OpenAI
+        response_generator = get_openai_response(st.session_state["messages"], model_choice)
+        if not response_generator:
             return  # If there's an error, we stop here
 
-        # Extract assistant text from the response
-        assistant_text = response.choices[0].message.content
-        # Minimal whitespace cleanup
+        # 3) Prepare a placeholder for the assistant's streaming text
+        assistant_text = ""
+        usage_info = None  # We'll capture usage if it's included in the final chunk
+        with st.chat_message("assistant"):
+            message_placeholder = st.empty()
+
+            # 4) Stream partial responses as they arrive
+            for update in response_generator:
+                if update is not None and hasattr(update, "choices") and update.choices:
+                    # Append the latest chunk of text, if any
+                    delta_content = update.choices[0].delta.get("content", "")
+                    assistant_text += delta_content
+
+                    # Update UI in real-time
+                    message_placeholder.write(assistant_text)
+
+                    # Check if usage is provided on this chunk (typically last chunk)
+                    if hasattr(update, "usage") and update.usage:
+                        usage_info = update.usage
+
+        # 5) Minimal whitespace cleanup on the final assistant text
         assistant_text = re.sub(r'[ \t]+$', '', assistant_text, flags=re.MULTILINE)
         assistant_text = re.sub(r'^\s*\n', '', assistant_text)
         assistant_text = re.sub(r'\n\s*$', '', assistant_text)
 
-        # 3) Append the assistant's message to the conversation and display
+        # 6) Append the assistant's final message to the conversation
         st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
-        with st.chat_message("assistant"):
-            st.write(assistant_text)
 
-        # 4) If token counting is enabled, pull usage info from the response
-        if token_counting_enabled and hasattr(response, "usage") and response.usage:
-            prompt_tokens = response.usage.prompt_tokens or 0
-            completion_tokens = response.usage.completion_tokens or 0
-            total_tokens = response.usage.total_tokens or 0
+        # 7) If token counting is enabled, pull usage info (if present)
+        if token_counting_enabled and usage_info:
+            prompt_tokens = usage_info.prompt_tokens or 0
+            completion_tokens = usage_info.completion_tokens or 0
+            total_tokens = usage_info.total_tokens or 0
 
             # Accumulate total tokens in session state
             st.session_state["total_tokens_used"] += total_tokens
