@@ -25,12 +25,31 @@ client = AzureOpenAI(
 )
 
 # =============================================================================
-# Function: Get response from Azure OpenAI (Streaming)
+# Function: get_openai_response (Non-Streaming)
 # =============================================================================
 def get_openai_response(messages, model_name):
     """
-    Fetches a response generator from Azure OpenAI using the OpenAI Python library.
-    We set stream=True so that we can iterate over the response in chunks.
+    Fetches a response (non-streaming) from Azure OpenAI using the OpenAI Python library.
+    Returns the full response object so we can access 'usage' fields.
+    """
+    try:
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=messages,
+            stream=False
+        )
+        return response
+    except OpenAIError as e:
+        st.error(f"OpenAI API Error: {str(e)}")
+        return None
+
+# =============================================================================
+# Function: get_openai_streaming_response
+# =============================================================================
+def get_openai_streaming_response(messages, model_name):
+    """
+    Returns a generator that yields partial content from Azure OpenAI Chat.
+    We set stream=True to get a streaming response.
     """
     try:
         response = client.chat.completions.create(
@@ -38,7 +57,7 @@ def get_openai_response(messages, model_name):
             messages=messages,
             stream=True
         )
-        return response  # returns a generator
+        return response  # This is a generator
     except OpenAIError as e:
         st.error(f"OpenAI API Error: {str(e)}")
         return None
@@ -60,15 +79,19 @@ def main():
     if "total_tokens_used" not in st.session_state:
         st.session_state["total_tokens_used"] = 0
 
-    # Sidebar: Model selection, token counting toggle, and clear button
+    # Sidebar: Model selection, streaming toggle, token counting toggle, clear button
     with st.sidebar:
         st.header("Configuration")
         st.write("Ensure your Azure OpenAI API key and endpoint are correct.")
         model_choice = st.selectbox("Select the Azure deployment:", AVAILABLE_MODELS, index=0)
 
+        # Toggle for streaming vs. non-streaming
+        streaming_enabled = st.checkbox("Enable Streaming", value=False)
+
         # Toggle for token counting
         token_counting_enabled = st.checkbox("Enable Token Counting", value=False)
 
+        # Clear conversation
         if st.button("Clear Conversation"):
             st.session_state["messages"] = [
                 {"role": "assistant", "content": "Conversation cleared. How can I help you now?"}
@@ -87,49 +110,60 @@ def main():
         with st.chat_message("user"):
             st.write(prompt)
 
-        # 2) Request a streaming response from Azure OpenAI
-        response_generator = get_openai_response(st.session_state["messages"], model_choice)
-        if not response_generator:
-            return  # If there's an error, we stop here
-
-        # 3) Prepare a placeholder for the assistant's streaming text
-        assistant_text = ""
-        usage_info = None  # We'll capture usage if it's included in the final chunk
+        # Prepare a container for the assistant's response
         with st.chat_message("assistant"):
             message_placeholder = st.empty()
+            assistant_text = ""
+            usage_info = None
 
-            # 4) Stream partial responses as they arrive
-            for update in response_generator:
-                if update is not None and hasattr(update, "choices") and update.choices:
-                    # Append the latest chunk of text, if any
-                    delta_content = update.choices[0].delta.get("content", "")
-                    assistant_text += delta_content
+            # 2) Decide if we do streaming or non-streaming
+            if streaming_enabled:
+                # STREAMING approach
+                response_generator = get_openai_streaming_response(st.session_state["messages"], model_choice)
+                if not response_generator:
+                    return  # If there's an error, stop here
 
-                    # Update UI in real-time
-                    message_placeholder.write(assistant_text)
+                # 2A) Iterate over chunks in the streaming response
+                for update in response_generator:
+                    if update and hasattr(update, "choices") and update.choices:
+                        # The 'delta' is likely a ChoiceDelta object with .content
+                        chunk = update.choices[0].delta.content if update.choices[0].delta else ""
+                        assistant_text += chunk
+                        # Update UI in real-time
+                        message_placeholder.write(assistant_text)
 
-                    # Check if usage is provided on this chunk (typically last chunk)
-                    if hasattr(update, "usage") and update.usage:
-                        usage_info = update.usage
+                        # If usage is attached (often only on final chunk)
+                        if hasattr(update, "usage") and update.usage:
+                            usage_info = update.usage
 
-        # 5) Minimal whitespace cleanup on the final assistant text
-        assistant_text = re.sub(r'[ \t]+$', '', assistant_text, flags=re.MULTILINE)
-        assistant_text = re.sub(r'^\s*\n', '', assistant_text)
-        assistant_text = re.sub(r'\n\s*$', '', assistant_text)
+            else:
+                # NON-STREAMING approach
+                response = get_openai_response(st.session_state["messages"], model_choice)
+                if not response:
+                    return  # If there's an error, stop here
 
-        # 6) Append the assistant's final message to the conversation
+                # Extract assistant text from the response
+                assistant_text = response.choices[0].message.content if response.choices else ""
+                usage_info = getattr(response, "usage", None)
+                # Immediately display the final text
+                message_placeholder.write(assistant_text)
+
+            # 3) Cleanup whitespace
+            assistant_text = re.sub(r'[ \t]+$', '', assistant_text, flags=re.MULTILINE)
+            assistant_text = re.sub(r'^\s*\n', '', assistant_text)
+            assistant_text = re.sub(r'\n\s*$', '', assistant_text)
+
+        # 4) Append the assistant's final message to the conversation
         st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
 
-        # 7) If token counting is enabled, pull usage info (if present)
+        # 5) Token counting if enabled and usage is present
         if token_counting_enabled and usage_info:
-            prompt_tokens = usage_info.prompt_tokens or 0
-            completion_tokens = usage_info.completion_tokens or 0
-            total_tokens = usage_info.total_tokens or 0
+            prompt_tokens = getattr(usage_info, "prompt_tokens", 0) or 0
+            completion_tokens = getattr(usage_info, "completion_tokens", 0) or 0
+            total_tokens = getattr(usage_info, "total_tokens", 0) or 0
 
-            # Accumulate total tokens in session state
             st.session_state["total_tokens_used"] += total_tokens
 
-            # Display token usage
             st.write(
                 f"**Tokens Used**: "
                 f"Prompt={prompt_tokens}, "
