@@ -12,7 +12,8 @@ AZURE_OPENAI_API_VERSION = st.secrets["AZURE_OPENAI_API_VERSION"]
 # List of deployments you have in Azure OpenAI
 AVAILABLE_MODELS = [
     "o1-mini",
-    "gpt-4o"
+    "gpt-4o",
+    "gpt-4o-mini"
     # Add or remove models here as needed
 ]
 
