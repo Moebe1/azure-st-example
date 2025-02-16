@@ -3,3 +3,4 @@ streamlit-extras
 openai
 markdown2
 markdown
+langchain
