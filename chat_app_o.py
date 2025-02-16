@@ -4,6 +4,9 @@ import re
 import json
 from datetime import datetime
 import os
+import markdown
+import base64
+from pathlib import Path
 
 # =============================================================================
 # Configuration - Azure OpenAI
@@ -28,17 +31,30 @@ client = AzureOpenAI(
 )
 
 # =============================================================================
+# System Prompts
+# =============================================================================
+DEFAULT_SYSTEM_PROMPTS = {
+    "General Assistant": "You are a helpful assistant ready to help with any task.",
+    "Technical Expert": "You are a technical expert focused on providing detailed, accurate technical information and code examples.",
+    "Creative Writer": "You are a creative writing assistant focused on helping with writing and storytelling.",
+    "Professional": "You are a professional assistant focused on business communication and formal interactions."
+}
+
+# =============================================================================
 # Chat Session Management
 # =============================================================================
 SESSIONS_DIR = "chat_sessions"
+EXPORTS_DIR = "chat_exports"
 os.makedirs(SESSIONS_DIR, exist_ok=True)
+os.makedirs(EXPORTS_DIR, exist_ok=True)
 
-def save_session(session_name, messages, total_tokens=0):
+def save_session(session_name, messages, total_tokens=0, system_prompt=""):
     """Save the current chat session to a file"""
     session_data = {
         "messages": messages,
         "total_tokens": total_tokens,
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now().isoformat(),
+        "system_prompt": system_prompt
     }
     file_path = os.path.join(SESSIONS_DIR, f"{session_name}.json")
     with open(file_path, "w") as f:
@@ -50,9 +66,9 @@ def load_session(session_name):
     try:
         with open(file_path, "r") as f:
             data = json.load(f)
-            return data["messages"], data.get("total_tokens", 0)
+            return data["messages"], data.get("total_tokens", 0), data.get("system_prompt", "")
     except FileNotFoundError:
-        return None, 0
+        return None, 0, ""
 
 def list_sessions():
     """List all available chat sessions"""
@@ -60,6 +76,31 @@ def list_sessions():
         return []
     sessions = [f[:-5] for f in os.listdir(SESSIONS_DIR) if f.endswith('.json')]
     return sorted(sessions, reverse=True)
+
+def export_chat(messages, format="markdown"):
+    """Export chat history to various formats"""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if format == "markdown":
+        content = "# Chat Export\n\n"
+        content += f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        
+        for msg in messages:
+            role = msg["role"].capitalize()
+            content += f"## {role}\n\n{msg['content']}\n\n"
+        
+        file_path = os.path.join(EXPORTS_DIR, f"chat_export_{timestamp}.md")
+        with open(file_path, "w") as f:
+            f.write(content)
+        return file_path
+    return None
+
+def get_download_link(file_path):
+    """Generate a download link for a file"""
+    with open(file_path, "rb") as f:
+        bytes_data = f.read()
+    b64 = base64.b64encode(bytes_data).decode()
+    filename = Path(file_path).name
+    return f'<a href="data:application/octet-stream;base64,{b64}" download="{filename}">Download {filename}</a>'
 
 # =============================================================================
 # Function: Non-Streaming Response
@@ -103,7 +144,30 @@ def get_openai_streaming_response(messages, model_name):
 # Main Streamlit App
 # =============================================================================
 def main():
-    st.set_page_config(page_title="Azure OpenAI Chat", page_icon="💬", layout="wide")
+    # Theme settings
+    if "theme" not in st.session_state:
+        st.session_state["theme"] = "light"
+    
+    # Apply theme
+    if st.session_state["theme"] == "dark":
+        st.markdown("""
+        <style>
+        .stApp {
+            background-color: #1E1E1E;
+            color: #FFFFFF;
+        }
+        .stMarkdown {
+            color: #FFFFFF;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+
+    st.set_page_config(
+        page_title="Azure OpenAI Chat",
+        page_icon="💬",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
     st.title("Azure OpenAI Chat Interface")
 
     # Initialize session states
@@ -115,10 +179,38 @@ def main():
         st.session_state["total_tokens_used"] = 0
     if "current_session" not in st.session_state:
         st.session_state["current_session"] = "new_session"
+    if "system_prompt" not in st.session_state:
+        st.session_state["system_prompt"] = DEFAULT_SYSTEM_PROMPTS["General Assistant"]
 
     # Sidebar: Configuration and Session Management
     with st.sidebar:
         st.header("Configuration")
+        
+        # Theme Toggle
+        theme = st.selectbox(
+            "Theme",
+            ["light", "dark"],
+            index=0 if st.session_state["theme"] == "light" else 1
+        )
+        if theme != st.session_state["theme"]:
+            st.session_state["theme"] = theme
+            st.experimental_rerun()
+        
+        # System Prompt Selection
+        st.subheader("System Prompt")
+        system_prompt_type = st.selectbox(
+            "Personality",
+            list(DEFAULT_SYSTEM_PROMPTS.keys())
+        )
+        custom_prompt = st.text_area(
+            "Custom System Prompt",
+            value=st.session_state["system_prompt"],
+            help="Define custom behavior for the assistant"
+        )
+        if custom_prompt != st.session_state["system_prompt"]:
+            st.session_state["system_prompt"] = custom_prompt
+
+        st.divider()
         
         # Session Management
         st.subheader("Session Management")
@@ -137,11 +229,13 @@ def main():
                     {"role": "assistant", "content": "Hello! How can I help you today?"}
                 ]
                 st.session_state["total_tokens_used"] = 0
+                st.session_state["system_prompt"] = DEFAULT_SYSTEM_PROMPTS["General Assistant"]
             else:
-                messages, total_tokens = load_session(selected_session)
+                messages, total_tokens, system_prompt = load_session(selected_session)
                 if messages:
                     st.session_state["messages"] = messages
                     st.session_state["total_tokens_used"] = total_tokens
+                    st.session_state["system_prompt"] = system_prompt
             st.session_state["current_session"] = selected_session
 
         # Save Session Button
@@ -151,11 +245,19 @@ def main():
                 save_session(
                     new_session_name,
                     st.session_state["messages"],
-                    st.session_state["total_tokens_used"]
+                    st.session_state["total_tokens_used"],
+                    st.session_state["system_prompt"]
                 )
                 st.success(f"Session '{new_session_name}' saved!")
                 st.session_state["current_session"] = new_session_name
                 st.experimental_rerun()
+
+        # Export Options
+        st.subheader("Export Chat")
+        if st.button("Export as Markdown"):
+            export_path = export_chat(st.session_state["messages"], "markdown")
+            if export_path:
+                st.markdown(get_download_link(export_path), unsafe_allow_html=True)
 
         st.divider()
         
@@ -178,14 +280,21 @@ def main():
         # Display existing conversation
         for msg in st.session_state["messages"]:
             with st.chat_message(msg["role"]):
-                st.write(msg["content"])
+                # Convert markdown to HTML for better rendering
+                html_content = markdown.markdown(msg["content"])
+                st.markdown(html_content, unsafe_allow_html=True)
 
     # Chat input box at the bottom
     if prompt := st.chat_input("Type your message here…"):
         # 1) Append the user's message to conversation
         st.session_state["messages"].append({"role": "user", "content": prompt})
         with st.chat_message("user"):
-            st.write(prompt)
+            st.markdown(prompt)
+
+        # Prepare messages with system prompt
+        messages_with_system = [
+            {"role": "system", "content": st.session_state["system_prompt"]}
+        ] + st.session_state["messages"]
 
         # Prepare a container for the assistant's response
         with st.chat_message("assistant"):
@@ -196,7 +305,7 @@ def main():
             # 2) Decide if we do streaming or non-streaming
             if streaming_enabled:
                 # STREAMING approach
-                response_generator = get_openai_streaming_response(st.session_state["messages"], model_choice)
+                response_generator = get_openai_streaming_response(messages_with_system, model_choice)
                 if not response_generator:
                     return  # If there's an error, stop here
 
@@ -209,7 +318,7 @@ def main():
                             chunk = update.choices[0].delta.content or ""  # Convert None to empty string
 
                         assistant_text += chunk
-                        message_placeholder.write(assistant_text)
+                        message_placeholder.markdown(assistant_text)
 
                         # If usage is attached (often only on the final chunk)
                         if hasattr(update, "usage") and update.usage:
@@ -217,7 +326,7 @@ def main():
 
             else:
                 # NON-STREAMING approach
-                response = get_openai_response(st.session_state["messages"], model_choice)
+                response = get_openai_response(messages_with_system, model_choice)
                 if not response:
                     return  # If there's an error, stop here
 
@@ -226,7 +335,7 @@ def main():
                     assistant_text = response.choices[0].message.content or ""
                 usage_info = getattr(response, "usage", None)
                 # Immediately display the final text
-                message_placeholder.write(assistant_text)
+                message_placeholder.markdown(assistant_text)
 
             # 3) Cleanup whitespace
             assistant_text = re.sub(r'[ \t]+$', '', assistant_text, flags=re.MULTILINE)
@@ -241,7 +350,8 @@ def main():
             save_session(
                 st.session_state["current_session"],
                 st.session_state["messages"],
-                st.session_state["total_tokens_used"]
+                st.session_state["total_tokens_used"],
+                st.session_state["system_prompt"]
             )
 
         # 5) Token counting if enabled and usage is present
