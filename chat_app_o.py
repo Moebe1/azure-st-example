@@ -116,16 +116,28 @@ def apply_custom_css():
         }
         
         /* Code Blocks */
-        pre {
+        .code-block {
+            margin: 1rem 0;
+        }
+        .code-block pre {
             position: relative;
             padding: 1rem;
             background-color: #f8f9fa;
             border-radius: 0.3rem;
+            overflow-x: auto;
+            margin: 0;
         }
-        .dark pre {
+        .dark .code-block pre {
             background-color: #1e1e1e;
+            color: #d4d4d4;
         }
-        .copy-button {
+        .code-block code {
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 0.9rem;
+            line-height: 1.4;
+            white-space: pre;
+        }
+        .code-block .copy-button {
             position: absolute;
             top: 0.5rem;
             right: 0.5rem;
@@ -134,10 +146,16 @@ def apply_custom_css():
             border: 1px solid #ddd;
             border-radius: 0.25rem;
             cursor: pointer;
+            opacity: 0;
+            transition: opacity 0.2s;
         }
-        .dark .copy-button {
+        .code-block:hover .copy-button {
+            opacity: 1;
+        }
+        .dark .code-block .copy-button {
             background-color: #2d2d2d;
             border-color: #444;
+            color: #d4d4d4;
         }
         
         /* Quick Navigation */
@@ -253,33 +271,41 @@ def format_timestamp(dt):
         return dt.strftime("%Y-%m-%d %H:%M")
 
 def process_code_blocks(content):
-    """Add copy buttons to code blocks"""
-    if "```" in content:
-        # Split content into parts
-        parts = content.split("```")
-        processed_content = parts[0]
+    """Add copy buttons to code blocks and properly format code"""
+    if "```" not in content:
+        return content
+
+    parts = content.split("```")
+    processed_content = parts[0]
+    
+    for i in range(1, len(parts), 2):
+        if i >= len(parts):
+            break
+            
+        # Get the code block and what comes after
+        code_block = parts[i].strip()
+        after_block = parts[i + 1] if i + 1 < len(parts) else ""
         
-        for i in range(1, len(parts), 2):
-            if i < len(parts):
-                code = parts[i].strip()
-                if i + 1 < len(parts):
-                    after = parts[i + 1]
-                else:
-                    after = ""
-                # Add copy button to code block
-                processed_content += f"""
-                <div class="code-block">
-                    <pre>
-                        <button class="copy-button" onclick="navigator.clipboard.writeText(`{code}`)">
-                            Copy
-                        </button>
-                        <code>{code}</code>
-                    </pre>
-                </div>
-                {after}
-                """
-        return processed_content
-    return content
+        # Extract language if specified
+        code_lines = code_block.split('\n')
+        language = code_lines[0].strip()
+        code = '\n'.join(code_lines[1:] if language else code_lines)
+        
+        # Escape HTML special characters
+        code_escaped = code.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        
+        # Create formatted code block
+        processed_content += f"""
+<div class="code-block">
+    <pre><code{f' class="language-{language}"' if language else ''}>{code_escaped}</code>
+        <button class="copy-button" onclick="navigator.clipboard.writeText(`{code.replace('`', '\\`')}`)">
+            Copy
+        </button>
+    </pre>
+</div>
+{after_block}"""
+    
+    return processed_content
 
 def display_message(msg, index):
     """Display a message with enhanced controls"""
