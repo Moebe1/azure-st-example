@@ -24,9 +24,9 @@ AVAILABLE_MODELS = [
 def get_langchain_agent(model_choice, system_prompt, verbose):
     try:
         llm = ChatOpenAI(
-            api_key=AZURE_OPENAI_API_KEY,
-            azure_endpoint=AZURE_OPENAI_ENDPOINT,
-            api_version=AZURE_OPENAI_API_VERSION,
+            openai_api_key=AZURE_OPENAI_API_KEY,
+            openai_api_base=AZURE_OPENAI_ENDPOINT,
+            openai_api_version=AZURE_OPENAI_API_VERSION,
             model=model_choice,
             streaming=True if model_choice != "o1-mini" else False
         )
