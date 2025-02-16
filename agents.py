@@ -42,8 +42,13 @@ def main():
     st.set_page_config(page_title="Agents", page_icon="🤖")
     st.title("LangChain Agents")
 
-    # Sidebar: Model selection, system prompt, streaming toggle, token counting toggle
+    # Sidebar: Navigation, Model selection, system prompt, streaming toggle, token counting toggle
     with st.sidebar:
+        st.header("Navigation")
+        page = st.radio("Go to:", ["Chat", "Agents"])
+        if page == "Chat":
+            st.switch_page("chat_app_o.py")
+
         st.header("Configuration")
         model_choice = st.selectbox("Select the primary model:", AVAILABLE_MODELS, index=0)
         system_prompt = st.text_area("Set System Prompt", "You are an AI assistant.")

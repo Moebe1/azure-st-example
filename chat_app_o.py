@@ -79,8 +79,13 @@ def main():
     if "total_tokens_used" not in st.session_state:
         st.session_state["total_tokens_used"] = 0
 
-    # Sidebar: Model selection, streaming toggle, token counting toggle, clear button
+    # Sidebar: Navigation, Model selection, streaming toggle, token counting toggle, clear button
     with st.sidebar:
+        st.header("Navigation")
+        page = st.radio("Go to:", ["Chat", "Agents"])
+        if page == "Agents":
+            st.switch_page("agents.py")
+
         st.header("Configuration")
         st.write("Ensure your Azure OpenAI API key and endpoint are correct.")
 
