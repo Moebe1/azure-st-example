@@ -141,7 +141,7 @@ def main():
 
                             # Capture the last usage information if available
                             if hasattr(update, "usage") and update.usage:
-                                last_usage_info = update.usage
+                                last_usage_info = update.usage # Update whenever usage is found
 
                     # After streaming is done, assign usage info to usage_info variable
                     usage_info = last_usage_info  # Use the last available usage info
