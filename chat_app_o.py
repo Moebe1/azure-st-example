@@ -7,7 +7,6 @@ import os
 import markdown
 import base64
 from pathlib import Path
-import pyperclip
 from datetime import datetime, timedelta
 
 # =============================================================================
@@ -149,6 +148,7 @@ def apply_custom_css():
             display: flex;
             flex-direction: column;
             gap: 0.5rem;
+            z-index: 1000;
         }
         .quick-nav button {
             padding: 0.5rem;
@@ -158,6 +158,11 @@ def apply_custom_css():
             color: white;
             cursor: pointer;
             opacity: 0.7;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         .quick-nav button:hover {
             opacity: 1;
@@ -298,12 +303,12 @@ def display_message(msg, index):
         col1, col2, col3 = st.columns([1, 1, 8])
         
         with col1:
-            if st.button("🗑️", key=f"delete_{index}"):
+            if st.button("🗑️", key=f"delete_{index}", help="Delete message"):
                 st.session_state["messages"].pop(index)
                 st.experimental_rerun()
         
         with col2:
-            if st.button("✏️", key=f"edit_{index}"):
+            if st.button("✏️", key=f"edit_{index}", help="Edit message"):
                 st.session_state[f"edit_mode_{index}"] = True
                 st.experimental_rerun()
         
@@ -441,7 +446,14 @@ def main():
             ["Select a template..."] + list(MESSAGE_TEMPLATES.keys())
         )
         if template_choice != "Select a template...":
-            st.session_state["template_text"] = MESSAGE_TEMPLATES[template_choice]
+            if st.button("Use Template"):
+                template_text = MESSAGE_TEMPLATES[template_choice]
+                st.session_state["messages"].append({
+                    "role": "user",
+                    "content": template_text,
+                    "timestamp": datetime.now().isoformat()
+                })
+                st.experimental_rerun()
         
         st.divider()
         
@@ -525,8 +537,8 @@ def main():
     # Quick navigation buttons
     st.markdown("""
         <div class="quick-nav">
-            <button onclick="window.scrollTo(0,0)">↑</button>
-            <button onclick="window.scrollTo(0,document.body.scrollHeight)">↓</button>
+            <button onclick="window.scrollTo(0,0)" title="Scroll to top">↑</button>
+            <button onclick="window.scrollTo(0,document.body.scrollHeight)" title="Scroll to bottom">↓</button>
         </div>
     """, unsafe_allow_html=True)
     
@@ -536,13 +548,7 @@ def main():
             display_message(msg, idx)
 
     # Chat input box at the bottom
-    if "template_text" in st.session_state:
-        default_text = st.session_state["template_text"]
-        del st.session_state["template_text"]
-    else:
-        default_text = ""
-
-    if prompt := st.chat_input("Type your message here…", key="chat_input", value=default_text):
+    if prompt := st.chat_input("Type your message here…"):
         # 1) Append the user's message to conversation
         st.session_state["messages"].append({
             "role": "user",
