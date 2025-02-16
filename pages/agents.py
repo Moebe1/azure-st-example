@@ -31,7 +31,14 @@ def get_langchain_agent(model_choice, system_prompt, verbose):
             streaming=True if model_choice != "o1-mini" else False
         )
         tools = [Tool(name="Example Tool", func=lambda x: f"Processed: {x}", description="An example tool.")]
-        agent = initialize_agent(tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=verbose)
+        agent = initialize_agent(
+            tools,
+            llm,
+            agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+            verbose=verbose,
+            handle_parsing_errors=True,
+            max_iterations=3
+        )
         return agent
     except OpenAIError as e:
         st.error(f"LangChain Agent Initialization Error: {str(e)}")
@@ -84,21 +91,31 @@ def main():
             response_text = ""
 
             if verbosity_enabled:
-                st.write(f"**Processing query using model:** {model_choice}")
-
-            if streaming_enabled and model_choice != "o1-mini":
-                with st.spinner("Thinking..."):
-                    response_generator = agent.run(prompt)
-                    for chunk in response_generator:
-                        response_text += chunk
+                with st.expander("View Agent's Reasoning", expanded=False):
+                    st.write("**Model:** ", model_choice)
+                    st.markdown("---")
+                    st.write("**Agent's Thought Process:**")
+                    
+            with st.spinner("Thinking..."):
+                try:
+                    if streaming_enabled and model_choice != "o1-mini":
+                        response_generator = agent.run(prompt)
+                        for chunk in response_generator:
+                            response_text += chunk
+                            if verbosity_enabled:
+                                with st.expander("View Agent's Reasoning", expanded=False):
+                                    st.write(chunk)
+                            message_placeholder.write(response_text)
+                    else:
+                        response_text = agent.run(prompt)
+                        if verbosity_enabled:
+                            with st.expander("View Agent's Reasoning", expanded=False):
+                                st.write(response_text)
                         message_placeholder.write(response_text)
-            else:
-                with st.spinner("Thinking..."):
-                    response_text = agent.run(prompt)
-                    message_placeholder.write(response_text)
-
-            if verbosity_enabled:
-                st.write("**Response generated successfully.**")
+                except Exception as e:
+                    error_message = str(e)
+                    st.error(f"An error occurred: {error_message}")
+                    response_text = "I apologize, but I encountered an error processing your request. Please try again or rephrase your query."
 
         st.session_state["messages"].append({"role": "assistant", "content": response_text})
 
