@@ -2,4 +2,4 @@ streamlit
 streamlit-extras
 openai
 markdown2
-pyperclip
+markdown
