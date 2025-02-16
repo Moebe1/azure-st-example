@@ -1,8 +1,6 @@
 import streamlit as st
-from langchain.agents import initialize_agent, AgentType
-from langchain_community.chat_models import ChatOpenAI
-from langchain.tools import Tool
-from openai import OpenAIError
+from openai import AzureOpenAI, OpenAIError
+import re
 
 # =============================================================================
 # Configuration - Azure OpenAI
@@ -18,21 +16,30 @@ AVAILABLE_MODELS = [
     "gpt-4o-mini"
 ]
 
+# Create an Azure OpenAI client
+client = AzureOpenAI(
+    api_key=AZURE_OPENAI_API_KEY,
+    azure_endpoint=AZURE_OPENAI_ENDPOINT,
+    api_version=AZURE_OPENAI_API_VERSION
+)
+
 # =============================================================================
-# Function: Initialize LangChain Agent
+# Function: Get OpenAI Response
 # =============================================================================
-def get_langchain_agent(model_name, system_prompt):
+def get_openai_response(messages, model_name, stream=False):
+    """
+    Fetches a response from Azure OpenAI using the OpenAI Python library.
+    Handles both streaming and non-streaming responses.
+    """
     try:
-        llm = ChatOpenAI(
-            openai_api_key=AZURE_OPENAI_API_KEY,
-            model_name=model_name,
-            streaming=True if model_name != "o1-mini" else False
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=messages,
+            stream=stream
         )
-        tools = [Tool(name="Example Tool", func=lambda x: f"Processed: {x}", description="An example tool.")]
-        agent = initialize_agent(tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=True)
-        return agent
+        return response
     except OpenAIError as e:
-        st.error(f"LangChain Agent Initialization Error: {str(e)}")
+        st.error(f"OpenAI API Error: {str(e)}")
         return None
 
 # =============================================================================
@@ -40,11 +47,16 @@ def get_langchain_agent(model_name, system_prompt):
 # =============================================================================
 def main():
     st.set_page_config(page_title="Agents", page_icon="🤖")
-    st.title("LangChain Agents")
+    st.title("Azure OpenAI Agents")
 
-    # Sidebar: Navigation, Model selection, system prompt, streaming toggle, token counting toggle
+    # Initialize session state for conversation
+    if "messages" not in st.session_state:
+        st.session_state["messages"] = [
+            {"role": "assistant", "content": "Hello! How can I assist you today?"}
+        ]
+
+    # Sidebar: Model selection, system prompt, streaming toggle, token counting toggle
     with st.sidebar:
-
         st.header("Configuration")
         model_choice = st.selectbox("Select the primary model:", AVAILABLE_MODELS, index=0)
         system_prompt = st.text_area("Set System Prompt", "You are an AI assistant.")
@@ -55,10 +67,10 @@ def main():
         if model_choice == "o1-mini" and streaming_enabled:
             st.warning("Streaming is not supported for o1-mini. Falling back to non-streaming.")
 
-    # Initialize agent
-    agent = get_langchain_agent(model_choice, system_prompt)
-    if not agent:
-        return
+    # Display existing conversation
+    for msg in st.session_state["messages"]:
+        with st.chat_message(msg["role"]):
+            st.write(msg["content"])
 
     # Chat input box
     if prompt := st.chat_input("Ask a question..."):
@@ -68,20 +80,33 @@ def main():
 
         with st.chat_message("assistant"):
             message_placeholder = st.empty()
-            response_text = ""
+            assistant_text = ""
+            usage_info = None
 
+            # Decide if we do streaming or non-streaming
             if streaming_enabled and model_choice != "o1-mini":
                 with st.spinner("Thinking..."):
-                    response_generator = agent.run(prompt)
-                    for chunk in response_generator:
-                        response_text += chunk
-                        message_placeholder.write(response_text)
+                    response_generator = get_openai_response(st.session_state["messages"], model_choice, stream=True)
+                    if not response_generator:
+                        return  # If there's an error, stop here
+
+                    for update in response_generator:
+                        if update and hasattr(update, "choices") and update.choices:
+                            chunk = update.choices[0].delta.content or ""
+                            assistant_text += chunk
+                            message_placeholder.write(assistant_text)
+
             else:
                 with st.spinner("Thinking..."):
-                    response_text = agent.run(prompt)
-                    message_placeholder.write(response_text)
+                    response = get_openai_response(st.session_state["messages"], model_choice, stream=False)
+                    if not response:
+                        return  # If there's an error, stop here
 
-        st.session_state["messages"].append({"role": "assistant", "content": response_text})
+                    if response.choices and response.choices[0].message:
+                        assistant_text = response.choices[0].message.content or ""
+                    message_placeholder.write(assistant_text)
+
+        st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
 
 if __name__ == "__main__":
     main()
