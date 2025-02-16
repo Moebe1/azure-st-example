@@ -1,5 +1,5 @@
 import streamlit as st
-from langchain_community.chat_models import ChatOpenAI
+from langchain_openai import AzureChatOpenAI
 from langchain.agents import initialize_agent, AgentType
 from langchain.tools import Tool
 from openai import OpenAIError
@@ -23,10 +23,11 @@ AVAILABLE_MODELS = [
 # =============================================================================
 def get_langchain_agent(model_choice, system_prompt, verbose):
     try:
-        llm = ChatOpenAI(
+        llm = AzureChatOpenAI(
+            azure_deployment=model_choice,
             openai_api_key=AZURE_OPENAI_API_KEY,
-            openai_api_base=AZURE_OPENAI_ENDPOINT,
-            model_name=model_choice,
+            azure_endpoint=AZURE_OPENAI_ENDPOINT,
+            openai_api_version=AZURE_OPENAI_API_VERSION,
             streaming=True if model_choice != "o1-mini" else False
         )
         tools = [Tool(name="Example Tool", func=lambda x: f"Processed: {x}", description="An example tool.")]
