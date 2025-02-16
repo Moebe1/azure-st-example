@@ -125,6 +125,9 @@ def main():
                     if not response_generator:
                         return  # If there's an error, stop here
 
+                    # Flag to check for presence of usage info
+                    last_usage_info = None
+
                     # 2A) Iterate over chunks in the streaming response
                     for update in response_generator:
                         if update and hasattr(update, "choices") and update.choices:
@@ -136,9 +139,12 @@ def main():
                             assistant_text += chunk
                             message_placeholder.write(assistant_text)
 
-                            # If usage is attached (often only on the final chunk)
+                            # Capture the last usage information if available
                             if hasattr(update, "usage") and update.usage:
-                                usage_info = update.usage
+                                last_usage_info = update.usage
+
+                    # After streaming is done, assign usage info to usage_info variable
+                    usage_info = last_usage_info  # Use the last available usage info
 
             else:
                 # NON-STREAMING approach
