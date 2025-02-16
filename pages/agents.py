@@ -44,10 +44,6 @@ def main():
 
     # Sidebar: Navigation, Model selection, system prompt, streaming toggle, token counting toggle
     with st.sidebar:
-        st.header("Navigation")
-        page = st.radio("Go to:", ["Chat", "Agents"])
-        if page == "Chat":
-            st.switch_page("chat_app_o.py")
 
         st.header("Configuration")
         model_choice = st.selectbox("Select the primary model:", AVAILABLE_MODELS, index=0)

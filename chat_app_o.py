@@ -81,10 +81,6 @@ def main():
 
     # Sidebar: Navigation, Model selection, streaming toggle, token counting toggle, clear button
     with st.sidebar:
-        st.header("Navigation")
-        page = st.radio("Go to:", ["Chat", "Agents"])
-        if page == "Agents":
-            st.switch_page("pages/agents.py")
 
         st.header("Configuration")
         st.write("Ensure your Azure OpenAI API key and endpoint are correct.")
