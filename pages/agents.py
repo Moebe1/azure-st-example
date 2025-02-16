@@ -26,8 +26,7 @@ def get_langchain_agent(model_choice, system_prompt, verbose):
         llm = ChatOpenAI(
             openai_api_key=AZURE_OPENAI_API_KEY,
             openai_api_base=AZURE_OPENAI_ENDPOINT,
-            openai_api_version=AZURE_OPENAI_API_VERSION,
-            model=model_choice,
+            model_name=model_choice,
             streaming=True if model_choice != "o1-mini" else False
         )
         tools = [Tool(name="Example Tool", func=lambda x: f"Processed: {x}", description="An example tool.")]
@@ -43,6 +42,12 @@ def get_langchain_agent(model_choice, system_prompt, verbose):
 def main():
     st.set_page_config(page_title="Agents", page_icon="🤖")
     st.title("LangChain Agents")
+
+    # Initialize session state for messages if not exists
+    if "messages" not in st.session_state:
+        st.session_state["messages"] = [
+            {"role": "assistant", "content": "Hello! How can I help you today?"}
+        ]
 
     # Sidebar: Model selection, system prompt, streaming toggle, token counting toggle, verbosity toggle
     with st.sidebar:
@@ -61,6 +66,11 @@ def main():
     agent = get_langchain_agent(model_choice, system_prompt, verbosity_enabled)
     if not agent:
         return
+
+    # Display existing conversation
+    for msg in st.session_state["messages"]:
+        with st.chat_message(msg["role"]):
+            st.write(msg["content"])
 
     # Chat input box
     if prompt := st.chat_input("Ask a question..."):
