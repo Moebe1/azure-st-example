@@ -305,12 +305,12 @@ def display_message(msg, index):
         with col1:
             if st.button("🗑️", key=f"delete_{index}", help="Delete message"):
                 st.session_state["messages"].pop(index)
-                st.experimental_rerun()
+                st.rerun()
         
         with col2:
             if st.button("✏️", key=f"edit_{index}", help="Edit message"):
                 st.session_state[f"edit_mode_{index}"] = True
-                st.experimental_rerun()
+                st.rerun()
         
         # Edit mode
         if st.session_state.get(f"edit_mode_{index}", False):
@@ -323,7 +323,7 @@ def display_message(msg, index):
                 st.session_state["messages"][index]["content"] = edited_content
                 st.session_state["messages"][index]["timestamp"] = datetime.now().isoformat()
                 st.session_state[f"edit_mode_{index}"] = False
-                st.experimental_rerun()
+                st.rerun()
         
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -333,7 +333,7 @@ def display_message(msg, index):
 def display_token_progress(total_tokens, model_name):
     """Display a visual progress bar for token usage"""
     token_limit = MODEL_TOKEN_LIMITS.get(model_name, 4096)
-    progress_percentage = (total_tokens / token_limit) * 100
+    progress_percentage = min(1.0, total_tokens / token_limit)  # Ensure value is between 0 and 1
     
     st.markdown("""
         <div class="token-progress-container">
@@ -341,10 +341,11 @@ def display_token_progress(total_tokens, model_name):
         </div>
     """, unsafe_allow_html=True)
     
-    progress_bar = st.progress(progress_percentage / 100)
-    st.write(f"Used: {total_tokens:,} / {token_limit:,} tokens ({progress_percentage:.1f}%)")
+    st.progress(progress_percentage)
+    percentage_display = (progress_percentage * 100)
+    st.write(f"Used: {total_tokens:,} / {token_limit:,} tokens ({percentage_display:.1f}%)")
     
-    if progress_percentage > 80:
+    if progress_percentage > 0.8:  # 80%
         st.warning("⚠️ Approaching token limit. Consider starting a new conversation.")
 
 # =============================================================================
@@ -421,7 +422,7 @@ def main():
         )
         if theme != st.session_state["theme"]:
             st.session_state["theme"] = theme
-            st.experimental_rerun()
+            st.rerun()
         
         # System Prompt Selection
         st.subheader("System Prompt")
@@ -453,7 +454,7 @@ def main():
                     "content": template_text,
                     "timestamp": datetime.now().isoformat()
                 })
-                st.experimental_rerun()
+                st.rerun()
         
         st.divider()
         
@@ -486,6 +487,7 @@ def main():
                     st.session_state["total_tokens_used"] = total_tokens
                     st.session_state["system_prompt"] = system_prompt
             st.session_state["current_session"] = selected_session
+            st.rerun()
 
         # Save Session Button
         if st.session_state["current_session"] == "new_session":
@@ -499,7 +501,7 @@ def main():
                 )
                 st.success(f"Session '{new_session_name}' saved!")
                 st.session_state["current_session"] = new_session_name
-                st.experimental_rerun()
+                st.rerun()
 
         # Export Options
         st.subheader("Export Chat")
@@ -517,7 +519,7 @@ def main():
         token_counting_enabled = st.checkbox("Enable Token Counting", value=True)
 
         # Display token progress
-        if token_counting_enabled:
+        if token_counting_enabled and st.session_state["total_tokens_used"] > 0:
             display_token_progress(st.session_state["total_tokens_used"], model_choice)
 
         # Clear conversation
@@ -530,6 +532,7 @@ def main():
                 }
             ]
             st.session_state["total_tokens_used"] = 0
+            st.rerun()
 
     # Main chat interface
     chat_container = st.container()
@@ -630,8 +633,8 @@ def main():
             prompt_tokens = getattr(usage_info, "prompt_tokens", 0) or 0
             completion_tokens = getattr(usage_info, "completion_tokens", 0) or 0
             total_tokens = getattr(usage_info, "total_tokens", 0) or 0
-
             st.session_state["total_tokens_used"] += total_tokens
+            st.rerun()  # Update the display with new token count
 
 if __name__ == "__main__":
     main()
