@@ -1,9 +1,6 @@
 import streamlit as st
 from openai import AzureOpenAI, OpenAIError
 import re
-import json
-from datetime import datetime
-import os
 
 # =============================================================================
 # Configuration - Azure OpenAI
@@ -12,15 +9,13 @@ AZURE_OPENAI_API_KEY = st.secrets["AZURE_OPENAI_API_KEY"]
 AZURE_OPENAI_ENDPOINT = st.secrets["AZURE_OPENAI_ENDPOINT"]
 AZURE_OPENAI_API_VERSION = st.secrets["AZURE_OPENAI_API_VERSION"]
 
-# Token limits per model
-MODEL_TOKEN_LIMITS = {
-    "o1-mini": 4096,
-    "gpt-4o": 8192,
-    "gpt-4o-mini": 8192
-}
-
 # List of deployments you have in Azure OpenAI
-AVAILABLE_MODELS = list(MODEL_TOKEN_LIMITS.keys())
+AVAILABLE_MODELS = [
+    "o1-mini",
+    "gpt-4o",
+    "gpt-4o-mini"
+    # Add or remove models here as needed
+]
 
 # Create an Azure OpenAI client (api_version applies to all deployments)
 client = AzureOpenAI(
@@ -28,40 +23,6 @@ client = AzureOpenAI(
     azure_endpoint=AZURE_OPENAI_ENDPOINT,
     api_version=AZURE_OPENAI_API_VERSION
 )
-
-# =============================================================================
-# Chat Session Management
-# =============================================================================
-SESSIONS_DIR = "chat_sessions"
-os.makedirs(SESSIONS_DIR, exist_ok=True)
-
-def save_session(session_name, messages, total_tokens=0):
-    """Save the current chat session to a file"""
-    session_data = {
-        "messages": messages,
-        "total_tokens": total_tokens,
-        "timestamp": datetime.now().isoformat()
-    }
-    file_path = os.path.join(SESSIONS_DIR, f"{session_name}.json")
-    with open(file_path, "w") as f:
-        json.dump(session_data, f, indent=2)
-
-def load_session(session_name):
-    """Load a chat session from a file"""
-    file_path = os.path.join(SESSIONS_DIR, f"{session_name}.json")
-    try:
-        with open(file_path, "r") as f:
-            data = json.load(f)
-            return data["messages"], data.get("total_tokens", 0)
-    except FileNotFoundError:
-        return None, 0
-
-def list_sessions():
-    """List all available chat sessions"""
-    if not os.path.exists(SESSIONS_DIR):
-        return []
-    sessions = [f[:-5] for f in os.listdir(SESSIONS_DIR) if f.endswith('.json')]
-    return sorted(sessions, reverse=True)
 
 # =============================================================================
 # Function: Non-Streaming Response
@@ -105,106 +66,49 @@ def get_openai_streaming_response(messages, model_name):
 # Main Streamlit App
 # =============================================================================
 def main():
-    st.set_page_config(page_title="Azure OpenAI Chat", page_icon="💬", layout="wide")
+    st.set_page_config(page_title="Azure OpenAI Chat", page_icon="💬")
     st.title("Azure OpenAI Chat Interface")
 
-    # Initialize session states
+    # Initialize session state for conversation
     if "messages" not in st.session_state:
         st.session_state["messages"] = [
-            {
-                "role": "assistant",
-                "content": "Hello! How can I help you today?",
-                "timestamp": datetime.now().isoformat()
-            }
+            {"role": "assistant", "content": "Hello! How can I help you today?"}
         ]
+
+    # Initialize total tokens used in the session
     if "total_tokens_used" not in st.session_state:
         st.session_state["total_tokens_used"] = 0
-    if "current_session" not in st.session_state:
-        st.session_state["current_session"] = "new_session"
 
-    # Sidebar: Configuration and Session Management
+    # Sidebar: Model selection, streaming toggle, token counting toggle, clear button
     with st.sidebar:
         st.header("Configuration")
-        
-        # Session Management
-        st.subheader("Session Management")
-        sessions = list_sessions()
-        session_options = ["new_session"] + sessions
-        selected_session = st.selectbox(
-            "Select Session",
-            session_options,
-            index=session_options.index(st.session_state["current_session"])
-        )
-
-        # Handle session changes
-        if selected_session != st.session_state["current_session"]:
-            if selected_session == "new_session":
-                st.session_state["messages"] = [
-                    {"role": "assistant", "content": "Hello! How can I help you today?"}
-                ]
-                st.session_state["total_tokens_used"] = 0
-            else:
-                messages, total_tokens = load_session(selected_session)
-                if messages:
-                    st.session_state["messages"] = messages
-                    st.session_state["total_tokens_used"] = total_tokens
-            st.session_state["current_session"] = selected_session
-
-        # Save Session Button
-        if st.session_state["current_session"] == "new_session":
-            new_session_name = st.text_input("Session Name", value="", key="new_session_name")
-            if st.button("Save Session") and new_session_name.strip():
-                save_session(
-                    new_session_name,
-                    st.session_state["messages"],
-                    st.session_state["total_tokens_used"]
-                )
-                st.success(f"Session '{new_session_name}' saved!")
-                st.session_state["current_session"] = new_session_name
-                st.experimental_rerun()
-
-        st.divider()
-        
-        # Model and Feature Configuration
-        st.subheader("Chat Configuration")
+        st.write("Ensure your Azure OpenAI API key and endpoint are correct.")
         model_choice = st.selectbox("Select the Azure deployment:", AVAILABLE_MODELS, index=0)
+
+        # Toggle for streaming vs. non-streaming
         streaming_enabled = st.checkbox("Enable Streaming", value=False)
+
+        # Toggle for token counting
         token_counting_enabled = st.checkbox("Enable Token Counting", value=False)
 
         # Clear conversation
         if st.button("Clear Conversation"):
             st.session_state["messages"] = [
-                {
-                    "role": "assistant",
-                    "content": "Conversation cleared. How can I help you now?",
-                    "timestamp": datetime.now().isoformat()
-                }
+                {"role": "assistant", "content": "Conversation cleared. How can I help you now?"}
             ]
             st.session_state["total_tokens_used"] = 0
 
-    # Main chat interface
-    chat_container = st.container()
-    with chat_container:
-        # Display existing conversation
-        for msg in st.session_state["messages"]:
-            with st.chat_message(msg["role"]):
-                st.write(msg["content"])
+    # Display existing conversation
+    for msg in st.session_state["messages"]:
+        with st.chat_message(msg["role"]):
+            st.write(msg["content"])
 
     # Chat input box at the bottom
     if prompt := st.chat_input("Type your message here…"):
         # 1) Append the user's message to conversation
-        st.session_state["messages"].append({
-            "role": "user",
-            "content": prompt,
-            "timestamp": datetime.now().isoformat()
-        })
+        st.session_state["messages"].append({"role": "user", "content": prompt})
         with st.chat_message("user"):
-            st.markdown(prompt)
-
-        # Prepare messages with system prompt
-        messages_with_system = [
-            {"role": "system", "content": st.session_state["system_prompt"]}
-        ] + st.session_state["messages"]
+            st.write(prompt)
 
         # Prepare a container for the assistant's response
         with st.chat_message("assistant"):
@@ -215,7 +119,7 @@ def main():
             # 2) Decide if we do streaming or non-streaming
             if streaming_enabled:
                 # STREAMING approach
-                response_generator = get_openai_streaming_response(messages_with_system, model_choice)
+                response_generator = get_openai_streaming_response(st.session_state["messages"], model_choice)
                 if not response_generator:
                     return  # If there's an error, stop here
 
@@ -236,7 +140,7 @@ def main():
 
             else:
                 # NON-STREAMING approach
-                response = get_openai_response(messages_with_system, model_choice)
+                response = get_openai_response(st.session_state["messages"], model_choice)
                 if not response:
                     return  # If there's an error, stop here
 
@@ -245,7 +149,7 @@ def main():
                     assistant_text = response.choices[0].message.content or ""
                 usage_info = getattr(response, "usage", None)
                 # Immediately display the final text
-                message_placeholder.markdown(assistant_text)
+                message_placeholder.write(assistant_text)
 
             # 3) Cleanup whitespace
             assistant_text = re.sub(r'[ \t]+$', '', assistant_text, flags=re.MULTILINE)
@@ -255,21 +159,21 @@ def main():
         # 4) Append the assistant's final message to the conversation
         st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
 
-        # Auto-save current session if it's not a new session
-        if st.session_state["current_session"] != "new_session":
-            save_session(
-                st.session_state["current_session"],
-                st.session_state["messages"],
-                st.session_state["total_tokens_used"]
-            )
-
         # 5) Token counting if enabled and usage is present
         if token_counting_enabled and usage_info:
             prompt_tokens = getattr(usage_info, "prompt_tokens", 0) or 0
             completion_tokens = getattr(usage_info, "completion_tokens", 0) or 0
             total_tokens = getattr(usage_info, "total_tokens", 0) or 0
+
             st.session_state["total_tokens_used"] += total_tokens
-            st.rerun()  # Update the display with new token count
+
+            st.write(
+                f"**Tokens Used**: "
+                f"Prompt={prompt_tokens}, "
+                f"Completion={completion_tokens}, "
+                f"Total={total_tokens} "
+                f"(Session Total={st.session_state['total_tokens_used']})"
+            )
 
 if __name__ == "__main__":
     main()
