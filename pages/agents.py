@@ -21,13 +21,14 @@ AVAILABLE_MODELS = [
 # =============================================================================
 # Function: Initialize LangChain Agent
 # =============================================================================
-def get_langchain_agent(model_name, system_prompt, verbose):
+def get_langchain_agent(model_choice, system_prompt, verbose):
     try:
         llm = ChatOpenAI(
-            openai_api_key=AZURE_OPENAI_API_KEY,
-            deployment_name=model_name,
-            openai_api_base=AZURE_OPENAI_ENDPOINT,
-            streaming=True if model_name != "o1-mini" else False
+            api_key=AZURE_OPENAI_API_KEY,
+            azure_endpoint=AZURE_OPENAI_ENDPOINT,
+            api_version=AZURE_OPENAI_API_VERSION,
+            model=model_choice,
+            streaming=True if model_choice != "o1-mini" else False
         )
         tools = [Tool(name="Example Tool", func=lambda x: f"Processed: {x}", description="An example tool.")]
         agent = initialize_agent(tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=verbose)
