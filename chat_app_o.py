@@ -2,12 +2,8 @@ import streamlit as st
 from openai import AzureOpenAI, OpenAIError
 import re
 import json
-from datetime import datetime
-import os
-import markdown
-import base64
-from pathlib import Path
 from datetime import datetime, timedelta
+import os
 
 # =============================================================================
 # Page Configuration - MUST BE FIRST
@@ -278,41 +274,47 @@ def process_code_blocks(content):
     parts = content.split("```")
     processed_content = parts[0]
     
-    for i in range(1, len(parts), 2):
-        if i >= len(parts):
-            break
-            
-        # Get the code block and what comes after
-        code_block = parts[i].strip()
-        after_block = parts[i + 1] if i + 1 < len(parts) else ""
-        
-        # Handle empty code blocks
-        if not code_block:
-            processed_content += "```"
+    for i in range(1, len(parts)):
+        # Handle odd number of backticks
+        if i % 2 == 0:
+            processed_content += "```" + parts[i]
             continue
             
-        # Extract language if specified
+        code_block = parts[i].strip()
+        after_block = parts[i+1] if i+1 < len(parts) else ""
+
+        # Skip empty code blocks
+        if not code_block:
+            continue
+
+        # Extract language and code
         code_lines = code_block.split('\n')
         language = code_lines[0].strip() if code_lines else ''
         code = '\n'.join(code_lines[1:] if language else code_lines)
         
-        # Escape HTML and JavaScript special characters
+        # Enhanced escaping for HTML and JS
         code_escaped = (
             code.replace('&', '&amp;')
                 .replace('<', '&lt;')
                 .replace('>', '&gt;')
                 .replace('"', '&quot;')
                 .replace("'", '&#39;')
+                .replace('\\', '&#92;')
         )
         
-        # Properly escape backticks for JavaScript template literals
-        js_code = code.replace('\\', '\\\\').replace('`', '\\`').replace('$', '\\$')
+        # JavaScript-safe encoding
+        js_code = (
+            code.replace('\\', '\\\\')
+                .replace('`', '\\`')
+                .replace('$', '\\$')
+                .replace('\n', '\\n')
+                .replace('\t', '\\t')
+        )
         
-        # Create formatted code block
         processed_content += f"""
 <div class="code-block">
     <pre><code{f' class="language-{language}"' if language else ''}>{code_escaped}</code>
-        <button class="copy-button" onclick="navigator.clipboard.writeText(`{js_code}`)">
+        <button class="copy-button" onclick="navigator.clipboard.writeText(`{js_code}`.replace(/&#92;&#92;/g, '\\\\'))">
             Copy
         </button>
     </pre>
