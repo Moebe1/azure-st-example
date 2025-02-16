@@ -55,13 +55,14 @@ def main():
             {"role": "assistant", "content": "Hello! How can I assist you today?"}
         ]
 
-    # Sidebar: Model selection, system prompt, streaming toggle, token counting toggle
+    # Sidebar: Model selection, system prompt, streaming toggle, token counting toggle, verbosity toggle
     with st.sidebar:
         st.header("Configuration")
         model_choice = st.selectbox("Select the primary model:", AVAILABLE_MODELS, index=0)
         system_prompt = st.text_area("Set System Prompt", "You are an AI assistant.")
         streaming_enabled = st.checkbox("Enable Streaming", value=False)
         token_counting_enabled = st.checkbox("Enable Token Counting", value=False)
+        verbosity_enabled = st.checkbox("Enable Verbose Mode", value=False)
 
         # Handle 01-mini streaming limitation
         if model_choice == "o1-mini" and streaming_enabled:
@@ -82,6 +83,9 @@ def main():
             message_placeholder = st.empty()
             assistant_text = ""
             usage_info = None
+
+            if verbosity_enabled:
+                st.write(f"**Processing query using model:** {model_choice}")
 
             # Decide if we do streaming or non-streaming
             if streaming_enabled and model_choice != "o1-mini":
@@ -105,6 +109,9 @@ def main():
                     if response.choices and response.choices[0].message:
                         assistant_text = response.choices[0].message.content or ""
                     message_placeholder.write(assistant_text)
+
+            if verbosity_enabled:
+                st.write("**Response generated successfully.**")
 
         st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
 
