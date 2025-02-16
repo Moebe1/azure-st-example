@@ -84,13 +84,6 @@ def main():
         st.header("Configuration")
         st.write("Ensure your Azure OpenAI API key and endpoint are correct.")
 
-        # Theme selection
-        theme_choice = st.selectbox("Select Theme:", ["Light", "Dark"], index=0)
-        if theme_choice == "Dark":
-            st.set_theme(theme="dark")
-        else:
-            st.set_theme(theme="light")
-
         model_choice = st.selectbox("Select the Azure deployment:", AVAILABLE_MODELS, index=0)
 
         # Toggle for streaming vs. non-streaming
