@@ -286,19 +286,33 @@ def process_code_blocks(content):
         code_block = parts[i].strip()
         after_block = parts[i + 1] if i + 1 < len(parts) else ""
         
+        # Handle empty code blocks
+        if not code_block:
+            processed_content += "```"
+            continue
+            
         # Extract language if specified
         code_lines = code_block.split('\n')
-        language = code_lines[0].strip()
+        language = code_lines[0].strip() if code_lines else ''
         code = '\n'.join(code_lines[1:] if language else code_lines)
         
-        # Escape HTML special characters
-        code_escaped = code.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+        # Escape HTML and JavaScript special characters
+        code_escaped = (
+            code.replace('&', '&amp;')
+                .replace('<', '&lt;')
+                .replace('>', '&gt;')
+                .replace('"', '&quot;')
+                .replace("'", '&#39;')
+        )
+        
+        # Properly escape backticks for JavaScript template literals
+        js_code = code.replace('\\', '\\\\').replace('`', '\\`').replace('$', '\\$')
         
         # Create formatted code block
         processed_content += f"""
 <div class="code-block">
     <pre><code{f' class="language-{language}"' if language else ''}>{code_escaped}</code>
-        <button class="copy-button" onclick="navigator.clipboard.writeText(`{code.replace('`', '\\`')}`)">
+        <button class="copy-button" onclick="navigator.clipboard.writeText(`{js_code}`)">
             Copy
         </button>
     </pre>
