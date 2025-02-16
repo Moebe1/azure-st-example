@@ -4,3 +4,4 @@ openai
 markdown2
 markdown
 langchain
+langchain_community
