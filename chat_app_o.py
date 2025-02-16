@@ -83,6 +83,14 @@ def main():
     with st.sidebar:
         st.header("Configuration")
         st.write("Ensure your Azure OpenAI API key and endpoint are correct.")
+
+        # Theme selection
+        theme_choice = st.selectbox("Select Theme:", ["Light", "Dark"], index=0)
+        if theme_choice == "Dark":
+            st.set_theme(theme="dark")
+        else:
+            st.set_theme(theme="light")
+
         model_choice = st.selectbox("Select the Azure deployment:", AVAILABLE_MODELS, index=0)
 
         # Toggle for streaming vs. non-streaming
@@ -119,37 +127,39 @@ def main():
             # 2) Decide if we do streaming or non-streaming
             if streaming_enabled:
                 # STREAMING approach
-                response_generator = get_openai_streaming_response(st.session_state["messages"], model_choice)
-                if not response_generator:
-                    return  # If there's an error, stop here
+                with st.spinner("Thinking..."):
+                    response_generator = get_openai_streaming_response(st.session_state["messages"], model_choice)
+                    if not response_generator:
+                        return  # If there's an error, stop here
 
-                # 2A) Iterate over chunks in the streaming response
-                for update in response_generator:
-                    if update and hasattr(update, "choices") and update.choices:
-                        # Safely handle the possibility that content can be None
-                        chunk = ""
-                        if update.choices[0].delta and hasattr(update.choices[0].delta, "content"):
-                            chunk = update.choices[0].delta.content or ""  # Convert None to empty string
+                    # 2A) Iterate over chunks in the streaming response
+                    for update in response_generator:
+                        if update and hasattr(update, "choices") and update.choices:
+                            # Safely handle the possibility that content can be None
+                            chunk = ""
+                            if update.choices[0].delta and hasattr(update.choices[0].delta, "content"):
+                                chunk = update.choices[0].delta.content or ""  # Convert None to empty string
 
-                        assistant_text += chunk
-                        message_placeholder.write(assistant_text)
+                            assistant_text += chunk
+                            message_placeholder.write(assistant_text)
 
-                        # If usage is attached (often only on the final chunk)
-                        if hasattr(update, "usage") and update.usage:
-                            usage_info = update.usage
+                            # If usage is attached (often only on the final chunk)
+                            if hasattr(update, "usage") and update.usage:
+                                usage_info = update.usage
 
             else:
                 # NON-STREAMING approach
-                response = get_openai_response(st.session_state["messages"], model_choice)
-                if not response:
-                    return  # If there's an error, stop here
+                with st.spinner("Thinking..."):
+                    response = get_openai_response(st.session_state["messages"], model_choice)
+                    if not response:
+                        return  # If there's an error, stop here
 
-                # Extract assistant text from the response
-                if response.choices and response.choices[0].message:
-                    assistant_text = response.choices[0].message.content or ""
-                usage_info = getattr(response, "usage", None)
-                # Immediately display the final text
-                message_placeholder.write(assistant_text)
+                    # Extract assistant text from the response
+                    if response.choices and response.choices[0].message:
+                        assistant_text = response.choices[0].message.content or ""
+                    usage_info = getattr(response, "usage", None)
+                    # Immediately display the final text
+                    message_placeholder.write(assistant_text)
 
             # 3) Cleanup whitespace
             assistant_text = re.sub(r'[ \t]+$', '', assistant_text, flags=re.MULTILINE)
@@ -159,7 +169,7 @@ def main():
         # 4) Append the assistant's final message to the conversation
         st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
 
-        # 5) Token counting if enabled and usage is present
+        # 5) Token counting if enabled and usage is present (now outside streaming/non-streaming blocks)
         if token_counting_enabled and usage_info:
             prompt_tokens = getattr(usage_info, "prompt_tokens", 0) or 0
             completion_tokens = getattr(usage_info, "completion_tokens", 0) or 0
@@ -174,6 +184,8 @@ def main():
                 f"Total={total_tokens} "
                 f"(Session Total={st.session_state['total_tokens_used']})"
             )
+
+        # 5) Token counting if enabled and usage is present (moved outside streaming/non-streaming blocks)
 
 if __name__ == "__main__":
     main()
