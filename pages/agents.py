@@ -1,6 +1,6 @@
 import streamlit as st
 from langchain.agents import initialize_agent, AgentType
-from langchain.chat_models import ChatOpenAI
+from langchain_community.chat_models import ChatOpenAI
 from langchain.tools import Tool
 from openai import OpenAIError
 
@@ -47,7 +47,7 @@ def main():
         st.header("Navigation")
         page = st.radio("Go to:", ["Chat", "Agents"])
         if page == "Chat":
-            st.switch_page("main")
+            st.switch_page("chat_app_o.py")
 
         st.header("Configuration")
         model_choice = st.selectbox("Select the primary model:", AVAILABLE_MODELS, index=0)
