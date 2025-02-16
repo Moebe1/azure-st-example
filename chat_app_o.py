@@ -9,19 +9,31 @@ import base64
 from pathlib import Path
 
 # =============================================================================
+# Page Configuration - MUST BE FIRST
+# =============================================================================
+st.set_page_config(
+    page_title="Azure OpenAI Chat",
+    page_icon="💬",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# =============================================================================
 # Configuration - Azure OpenAI
 # =============================================================================
 AZURE_OPENAI_API_KEY = st.secrets["AZURE_OPENAI_API_KEY"]
 AZURE_OPENAI_ENDPOINT = st.secrets["AZURE_OPENAI_ENDPOINT"]
 AZURE_OPENAI_API_VERSION = st.secrets["AZURE_OPENAI_API_VERSION"]
 
+# Token limits per model
+MODEL_TOKEN_LIMITS = {
+    "o1-mini": 4096,
+    "gpt-4o": 8192,
+    "gpt-4o-mini": 8192
+}
+
 # List of deployments you have in Azure OpenAI
-AVAILABLE_MODELS = [
-    "o1-mini",
-    "gpt-4o",
-    "gpt-4o-mini"
-    # Add or remove models here as needed
-]
+AVAILABLE_MODELS = list(MODEL_TOKEN_LIMITS.keys())
 
 # Create an Azure OpenAI client (api_version applies to all deployments)
 client = AzureOpenAI(
@@ -39,6 +51,34 @@ DEFAULT_SYSTEM_PROMPTS = {
     "Creative Writer": "You are a creative writing assistant focused on helping with writing and storytelling.",
     "Professional": "You are a professional assistant focused on business communication and formal interactions."
 }
+
+# =============================================================================
+# Styling
+# =============================================================================
+def apply_custom_css():
+    st.markdown("""
+        <style>
+        .message-container {
+            margin-bottom: 1rem;
+            padding: 0.5rem;
+            border-radius: 0.5rem;
+        }
+        .message-controls {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+        .token-progress-container {
+            margin-top: 1rem;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            background-color: #f0f2f6;
+        }
+        .dark .token-progress-container {
+            background-color: #262730;
+        }
+        </style>
+    """, unsafe_allow_html=True)
 
 # =============================================================================
 # Chat Session Management
@@ -103,7 +143,69 @@ def get_download_link(file_path):
     return f'<a href="data:application/octet-stream;base64,{b64}" download="{filename}">Download {filename}</a>'
 
 # =============================================================================
-# Function: Non-Streaming Response
+# Token Management
+# =============================================================================
+def display_token_progress(total_tokens, model_name):
+    """Display a visual progress bar for token usage"""
+    token_limit = MODEL_TOKEN_LIMITS.get(model_name, 4096)
+    progress_percentage = (total_tokens / token_limit) * 100
+    
+    st.markdown("""
+        <div class="token-progress-container">
+            <p>Token Usage</p>
+        </div>
+    """, unsafe_allow_html=True)
+    
+    progress_bar = st.progress(progress_percentage / 100)
+    st.write(f"Used: {total_tokens:,} / {token_limit:,} tokens ({progress_percentage:.1f}%)")
+    
+    if progress_percentage > 80:
+        st.warning("⚠️ Approaching token limit. Consider starting a new conversation.")
+
+# =============================================================================
+# Message Management
+# =============================================================================
+def display_message(msg, index):
+    """Display a message with edit and delete controls"""
+    with st.container():
+        # Message content
+        if msg["role"] == "assistant":
+            with st.chat_message("assistant"):
+                st.markdown(msg["content"])
+                
+                # Message controls
+                col1, col2 = st.columns([1, 8])
+                with col1:
+                    if st.button("🗑️", key=f"delete_{index}"):
+                        st.session_state["messages"].pop(index)
+                        st.experimental_rerun()
+                with col2:
+                    if st.button("✏️", key=f"edit_{index}"):
+                        st.session_state[f"edit_mode_{index}"] = True
+                        st.experimental_rerun()
+                
+                # Edit mode
+                if st.session_state.get(f"edit_mode_{index}", False):
+                    edited_content = st.text_area(
+                        "Edit message",
+                        value=msg["content"],
+                        key=f"edit_area_{index}"
+                    )
+                    if st.button("Save", key=f"save_{index}"):
+                        st.session_state["messages"][index]["content"] = edited_content
+                        st.session_state[f"edit_mode_{index}"] = False
+                        st.experimental_rerun()
+        else:
+            with st.chat_message("user"):
+                st.markdown(msg["content"])
+                
+                # Only show delete for user messages
+                if st.button("🗑️", key=f"delete_{index}"):
+                    st.session_state["messages"].pop(index)
+                    st.experimental_rerun()
+
+# =============================================================================
+# OpenAI Response Functions
 # =============================================================================
 def get_openai_response(messages, model_name):
     """
@@ -121,9 +223,6 @@ def get_openai_response(messages, model_name):
         st.error(f"OpenAI API Error: {str(e)}")
         return None
 
-# =============================================================================
-# Function: Streaming Response
-# =============================================================================
 def get_openai_streaming_response(messages, model_name):
     """
     Returns a generator that yields partial content from Azure OpenAI Chat.
@@ -144,30 +243,9 @@ def get_openai_streaming_response(messages, model_name):
 # Main Streamlit App
 # =============================================================================
 def main():
-    # Theme settings
-    if "theme" not in st.session_state:
-        st.session_state["theme"] = "light"
+    # Apply custom CSS
+    apply_custom_css()
     
-    # Apply theme
-    if st.session_state["theme"] == "dark":
-        st.markdown("""
-        <style>
-        .stApp {
-            background-color: #1E1E1E;
-            color: #FFFFFF;
-        }
-        .stMarkdown {
-            color: #FFFFFF;
-        }
-        </style>
-        """, unsafe_allow_html=True)
-
-    st.set_page_config(
-        page_title="Azure OpenAI Chat",
-        page_icon="💬",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
     st.title("Azure OpenAI Chat Interface")
 
     # Initialize session states
@@ -181,6 +259,8 @@ def main():
         st.session_state["current_session"] = "new_session"
     if "system_prompt" not in st.session_state:
         st.session_state["system_prompt"] = DEFAULT_SYSTEM_PROMPTS["General Assistant"]
+    if "theme" not in st.session_state:
+        st.session_state["theme"] = "light"
 
     # Sidebar: Configuration and Session Management
     with st.sidebar:
@@ -265,7 +345,11 @@ def main():
         st.subheader("Chat Configuration")
         model_choice = st.selectbox("Select the Azure deployment:", AVAILABLE_MODELS, index=0)
         streaming_enabled = st.checkbox("Enable Streaming", value=False)
-        token_counting_enabled = st.checkbox("Enable Token Counting", value=False)
+        token_counting_enabled = st.checkbox("Enable Token Counting", value=True)
+
+        # Display token progress
+        if token_counting_enabled:
+            display_token_progress(st.session_state["total_tokens_used"], model_choice)
 
         # Clear conversation
         if st.button("Clear Conversation"):
@@ -277,12 +361,9 @@ def main():
     # Main chat interface
     chat_container = st.container()
     with chat_container:
-        # Display existing conversation
-        for msg in st.session_state["messages"]:
-            with st.chat_message(msg["role"]):
-                # Convert markdown to HTML for better rendering
-                html_content = markdown.markdown(msg["content"])
-                st.markdown(html_content, unsafe_allow_html=True)
+        # Display existing conversation with edit/delete controls
+        for idx, msg in enumerate(st.session_state["messages"]):
+            display_message(msg, idx)
 
     # Chat input box at the bottom
     if prompt := st.chat_input("Type your message here…"):
@@ -361,14 +442,6 @@ def main():
             total_tokens = getattr(usage_info, "total_tokens", 0) or 0
 
             st.session_state["total_tokens_used"] += total_tokens
-
-            st.write(
-                f"**Tokens Used**: "
-                f"Prompt={prompt_tokens}, "
-                f"Completion={completion_tokens}, "
-                f"Total={total_tokens} "
-                f"(Session Total={st.session_state['total_tokens_used']})"
-            )
 
 if __name__ == "__main__":
     main()
