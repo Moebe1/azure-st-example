@@ -47,7 +47,7 @@ def main():
         st.header("Navigation")
         page = st.radio("Go to:", ["Chat", "Agents"])
         if page == "Chat":
-            st.switch_page("chat_app_o.py")
+            st.switch_page("main")
 
         st.header("Configuration")
         model_choice = st.selectbox("Select the primary model:", AVAILABLE_MODELS, index=0)
