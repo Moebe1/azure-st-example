@@ -30,6 +30,40 @@ client = AzureOpenAI(
 )
 
 # =============================================================================
+# Chat Session Management
+# =============================================================================
+SESSIONS_DIR = "chat_sessions"
+os.makedirs(SESSIONS_DIR, exist_ok=True)
+
+def save_session(session_name, messages, total_tokens=0):
+    """Save the current chat session to a file"""
+    session_data = {
+        "messages": messages,
+        "total_tokens": total_tokens,
+        "timestamp": datetime.now().isoformat()
+    }
+    file_path = os.path.join(SESSIONS_DIR, f"{session_name}.json")
+    with open(file_path, "w") as f:
+        json.dump(session_data, f, indent=2)
+
+def load_session(session_name):
+    """Load a chat session from a file"""
+    file_path = os.path.join(SESSIONS_DIR, f"{session_name}.json")
+    try:
+        with open(file_path, "r") as f:
+            data = json.load(f)
+            return data["messages"], data.get("total_tokens", 0)
+    except FileNotFoundError:
+        return None, 0
+
+def list_sessions():
+    """List all available chat sessions"""
+    if not os.path.exists(SESSIONS_DIR):
+        return []
+    sessions = [f[:-5] for f in os.listdir(SESSIONS_DIR) if f.endswith('.json')]
+    return sorted(sessions, reverse=True)
+
+# =============================================================================
 # Function: Non-Streaming Response
 # =============================================================================
 def get_openai_response(messages, model_name):
