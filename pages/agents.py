@@ -25,7 +25,7 @@ def get_langchain_agent(model_name, system_prompt, verbose):
     try:
         llm = ChatOpenAI(
             openai_api_key=AZURE_OPENAI_API_KEY,
-            model_name=model_name,
+            deployment_name=model_name,
             openai_api_base=AZURE_OPENAI_ENDPOINT,
             streaming=True if model_name != "o1-mini" else False
         )
