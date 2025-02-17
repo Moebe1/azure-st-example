@@ -95,6 +95,10 @@ json_parser = JsonOutputToolsParser(return_id=True)
 # ==============================
 @chain_runnable
 def reflexion_chain(state: Dict, config: RunnableConfig):
+    import logging
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+    logging.debug(f"reflexion_chain - state: {state}")
+    logging.debug(f"reflexion_chain - config: {config}")
     """
     Calls Azure Chat. 
     Returns { 'messages': [assistant_msg], 'tool_calls': [parsed items] }
@@ -138,6 +142,10 @@ def reflexion_chain(state: Dict, config: RunnableConfig):
 # ==============================
 @chain_runnable
 def tool_chain(state: Dict, config: RunnableConfig):
+    import logging
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+    logging.debug(f"tool_chain - state: {state}")
+    logging.debug(f"tool_chain - config: {config}")
     """
     If there's a 'type': 'tool_call' with 'search_queries',
     run Távily, and append the result as an assistant message.
@@ -188,6 +196,9 @@ builder.add_edge("tool", "revise")
 MAX_ITERATIONS = 3
 
 def reflexion_loop(state: ReflexionState) -> str:
+    import logging
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+    logging.debug(f"reflexion_loop - state: {state}")
     expansions = 0
     for tc in state.get("tool_calls", []):
         if tc.get("type") == "tool_call":
