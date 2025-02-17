@@ -24,7 +24,7 @@ AVAILABLE_MODELS = [
 def get_langchain_agent(model_choice, system_prompt, verbose):
     try:
         from langchain.prompts import PromptTemplate
-        from langchain import LLMChain
+        from langchain.chains import LLMChain
 
         # Define Chain-of-Thought (CoT) prompt template
         chain_of_thought_template = PromptTemplate(
@@ -63,7 +63,7 @@ Final Answer:
             agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
             verbose=verbose,
             handle_parsing_errors=True,
-            max_iterations=3
+            max_iterations=5  # Increased to allow more reasoning steps
         )
         return agent
     except OpenAIError as e:
@@ -87,7 +87,8 @@ def main():
     with st.sidebar:
         st.header("Configuration")
         model_choice = st.selectbox("Select the primary model:", AVAILABLE_MODELS, index=0)
-        system_prompt = st.text_area("Set System Prompt", "You are an AI assistant.")
+        default_system_prompt = "You are an AI assistant."
+        system_prompt = st.text_area("Set System Prompt", default_system_prompt)
         streaming_enabled = st.checkbox("Enable Streaming", value=False)
         token_counting_enabled = st.checkbox("Enable Token Counting", value=False)
         verbosity_enabled = st.checkbox("Enable Verbose Mode", value=False)
@@ -126,11 +127,11 @@ def main():
                 try:
                     if streaming_enabled and model_choice != "o1-mini":
                         response_generator = agent.run(prompt)
-                        reasoning_expander = st.expander("View Agent's Reasoning", expanded=True) if verbosity_enabled else None
+                        unified_expander = st.expander("Agent's Reasoning and Response", expanded=True) if verbosity_enabled else None
                         for chunk in response_generator:
                             response_text += chunk
-                            if verbosity_enabled and reasoning_expander:
-                                reasoning_expander.markdown(chunk)
+                            if verbosity_enabled and unified_expander:
+                                unified_expander.markdown(chunk)
                             message_placeholder.markdown(response_text)
                     else:
                         response_text = agent.run(prompt)
