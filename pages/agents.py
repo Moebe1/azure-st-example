@@ -1,13 +1,13 @@
 import streamlit as st
 from langchain_openai import AzureChatOpenAI
 from langchain.agents import (
-    initialize_agent,
-    AgentType,
     ZeroShotAgent,
     AgentExecutor
 )
 from langchain.tools import Tool
 from openai import OpenAIError
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
 
 # =============================================================================
 # Configuration - Azure OpenAI
@@ -24,7 +24,7 @@ AVAILABLE_MODELS = [
 ]
 
 # =============================================================================
-# Function: Initialize LangChain Agent (Option B: Inject Custom Prompt)
+# Function: Initialize LangChain Agent (Option B with valid llm_chain)
 # =============================================================================
 def get_langchain_agent(model_choice, system_prompt, verbose):
     """
@@ -43,14 +43,16 @@ def get_langchain_agent(model_choice, system_prompt, verbose):
         )
 
         # Define any tools you want the agent to use
-        tools = [Tool(
-            name="Example Tool",
-            func=lambda x: f"Processed: {x}",
-            description="An example tool."
-        )]
+        tools = [
+            Tool(
+                name="Example Tool",
+                func=lambda x: f"Processed: {x}",
+                description="An example tool."
+            )
+        ]
 
         # ---------------------------------------------------------------------
-        # 1) CREATE A CUSTOM PROMPT FOR ZERO-SHOT AGENT
+        # 1) CREATE A CUSTOM PROMPT TEMPLATE (PREFIX + SUFFIX)
         # ---------------------------------------------------------------------
         CUSTOM_PREFIX = """You are a helpful AI assistant specialized in step-by-step reasoning (Chain-of-Thought).
 Please reason through the problem carefully and derive the answer.
@@ -69,25 +71,34 @@ Remember to respond only with your final answer, not the chain-of-thought steps.
 
         CUSTOM_SUFFIX = "Begin!"
 
-        # Create a custom ZeroShotAgent prompt
-        prompt = ZeroShotAgent.create_prompt(
-            tools=tools,
-            prefix=CUSTOM_PREFIX,
-            suffix=CUSTOM_SUFFIX,
-            input_variables=["input", "agent_scratchpad"]
+        # Build a PromptTemplate for the agent
+        custom_prompt = PromptTemplate(
+            input_variables=["input", "agent_scratchpad"],
+            template=f"{CUSTOM_PREFIX}{{agent_scratchpad}}\n\n{{input}}\n\n{CUSTOM_SUFFIX}"
         )
 
         # ---------------------------------------------------------------------
-        # 2) BUILD THE ZERO-SHOT AGENT WITH YOUR CUSTOM PROMPT
+        # 2) CREATE THE LLM CHAIN (ZeroShotAgent REQUIRES llm_chain)
+        # ---------------------------------------------------------------------
+        llm_chain = LLMChain(
+            llm=llm,
+            prompt=custom_prompt,
+            verbose=verbose
+        )
+
+        # Prepare a list of tool names for the agent to recognize
+        allowed_tools = [tool.name for tool in tools]
+
+        # ---------------------------------------------------------------------
+        # 3) BUILD THE ZERO-SHOT AGENT USING THE LLM CHAIN
         # ---------------------------------------------------------------------
         agent_instance = ZeroShotAgent(
-            llm=llm,
-            tools=tools,
-            prompt=prompt
+            llm_chain=llm_chain,
+            allowed_tools=allowed_tools
         )
 
         # ---------------------------------------------------------------------
-        # 3) WRAP THE AGENT IN AN AGENTEXECUTOR
+        # 4) WRAP THE AGENT IN AN AGENTEXECUTOR
         # ---------------------------------------------------------------------
         agent = AgentExecutor.from_agent_and_tools(
             agent=agent_instance,
@@ -169,7 +180,6 @@ def main():
                                 reasoning_text += chunk
                             message_placeholder.markdown(response_text.strip())
                         if verbosity_enabled and unified_expander:
-                            # Post-process reasoning text
                             refined_reasoning = " ".join(reasoning_text.splitlines()).strip()
                             unified_expander.markdown(refined_reasoning)
                     else:
