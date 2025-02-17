@@ -145,7 +145,7 @@ def get_openai_response(messages, model_name):
         st.error(f"OpenAI API Error: {str(e)}")
         return None
 
-def process_response(response):
+def process_response(response, user_question):
     assistant_text = ""
     if response and response.choices and response.choices[0].message:
         message = response.choices[0].message
@@ -167,7 +167,20 @@ def process_response(response):
                         if search_results and isinstance(search_results, list):
                             # Concatenate the content of all search results
                             combined_content = "\n".join([result.get("content", "") for result in search_results if isinstance(result, dict)])
-                            assistant_text = f"Search results: {combined_content}"
+                            # Include the user's question and search results in the messages sent to the OpenAI API
+                            messages = [
+                                {"role": "user", "content": user_question},
+                                {"role": "assistant", "content": f"Search results: {combined_content}"}
+                            ]
+                            response = client.chat.completions.create(
+                                model="gpt-4o",  # Or another suitable model
+                                messages=messages,
+                                stream=False
+                            )
+                            if response and response.choices and response.choices[0].message:
+                                assistant_text = response.choices[0].message.content or ""
+                            else:
+                                assistant_text = "Could not synthesize the information."
                         else:
                             assistant_text = "\n\nCould not find relevant information in search results."
                 except Exception as e:
@@ -216,7 +229,7 @@ def main():
             with st.spinner("Thinking..."):
                 messages = st.session_state["messages"]
                 response = get_openai_response(messages, model_choice)
-                assistant_text = process_response(response)
+                assistant_text = process_response(response, prompt)
 
                 st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
                 message_placeholder.write(assistant_text)
