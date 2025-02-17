@@ -163,25 +163,37 @@ def process_response(response):
                     if function_name == "tavily_search_results_json" and "Bitcoin price" in function_args:
                         query = eval(function_args)['query']
                         search_results = tavily_search.run(query)
-                        # Extract Bitcoin price from search results (this is a simplified approach)
-                        if search_results:
-                            btc_price = re.search(r"[\$\d,]+", search_results).group(0)
-                            assistant_text += f"\n\nCurrent Bitcoin price: {btc_price}"
+                        # Extract Bitcoin price from search results
+                        if search_results and isinstance(search_results, list):
+                            for result in search_results:
+                                if isinstance(result, dict) and "content" in result:
+                                    price_match = re.search(r"[\$\d,]+", result["content"])
+                                    if price_match:
+                                        btc_price = price_match.group(0)
+                                        assistant_text += f"\n\nCurrent Bitcoin price: {btc_price}"
+                                        break # Stop after finding the first price
+                        else:
+                            assistant_text += "\n\nCould not find Bitcoin price in search results."
 
 
                     elif function_name == "calculate" and btc_price:
-                        expression = f"{btc_price} * 0.15"
+                        expression = f"{btc_price.replace('$', '').replace(',', '')} * 0.15"
                         result = calculate(expression)
                         assistant_text += f"\n\n15% of the Bitcoin price: {result}"
 
                     elif function_name == "tavily_search_results_json" and "energy consumption" in function_args:
                         query = eval(function_args)['query']
                         search_results = tavily_search.run(query)
-                        # Extract URL of the first article (this is a simplified approach)
-                        if search_results:
-                            url = re.search(r"https?://[^\s]+", search_results).group(0)
-                            energy_article_summary = summarize_document(url)
-                            assistant_text += f"\n\nSummary of Bitcoin energy consumption article: {energy_article_summary}"
+                        # Extract URL of the first article
+                        if search_results and isinstance(search_results, list):
+                            for result in search_results:
+                                if isinstance(result, dict) and "url" in result:
+                                    url = result["url"]
+                                    energy_article_summary = summarize_document(url)
+                                    assistant_text += f"\n\nSummary of Bitcoin energy consumption article: {energy_article_summary}"
+                                    break # Stop after summarizing the first article
+                        else:
+                            assistant_text += "\n\nCould not find Bitcoin energy consumption article."
 
 
                 except Exception as e:
