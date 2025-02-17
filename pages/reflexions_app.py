@@ -52,14 +52,13 @@ def get_openai_response(messages, model_name, streaming_enabled):
                 messages=messages,
                 stream=True
             )
-            reasoning_tokens = []
-            for chunk in response:
-                if "choices" in chunk and chunk["choices"]:
-                    delta_content = chunk["choices"][0].get("delta", {}).get("content", "")
-                    if delta_content:
-                        reasoning_tokens.append(delta_content)
-                        yield delta_content  # Yield each token for real-time updates
-            return None, reasoning_tokens
+            def token_generator():
+                for chunk in response:
+                    if "choices" in chunk and chunk["choices"]:
+                        delta_content = chunk["choices"][0].get("delta", {}).get("content", "")
+                        if delta_content:
+                            yield delta_content
+            return None, token_generator()
         else:
             response = client.chat.completions.create(
                 model=model_name,
@@ -117,15 +116,16 @@ def main():
             usage_info = None
 
             with st.spinner("Thinking..."):
+                response, reasoning_data = get_openai_response(st.session_state["messages"], model_choice, streaming_enabled)
+                if not response and not streaming_enabled:
+                    return
+
                 if streaming_enabled:
                     reasoning_tokens = []
-                    for token in get_openai_response(st.session_state["messages"], model_choice, streaming_enabled):
+                    for token in reasoning_data:
                         reasoning_tokens.append(token)
                         reasoning_placeholder.write("".join(reasoning_tokens))
                 else:
-                    response, reasoning_tokens = get_openai_response(st.session_state["messages"], model_choice, streaming_enabled)
-                    if not response:
-                        return
                     if response.choices and response.choices[0].message:
                         assistant_text = response.choices[0].message.content or ""
                     usage_info = getattr(response, "usage", None)
