@@ -97,10 +97,6 @@ def main():
             ]
             st.session_state["total_tokens_used"] = 0
 
-    reasoning_tokens = []
-    with st.expander("Reasoning Tokens", expanded=True):
-        reasoning_placeholder = st.empty()
-
     for msg in st.session_state["messages"]:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
@@ -120,11 +116,12 @@ def main():
                 if not response and not streaming_enabled:
                     return
 
+                reasoning_tokens = []
                 if streaming_enabled:
-                    reasoning_tokens = []
+                    reasoning_placeholder = st.empty()
                     for token in reasoning_data:
                         reasoning_tokens.append(token)
-                        reasoning_placeholder.write("".join(reasoning_tokens))
+                        reasoning_placeholder.markdown("**Reasoning Tokens:**\n" + "".join(reasoning_tokens))
                 else:
                     if response.choices and response.choices[0].message:
                         assistant_text = response.choices[0].message.content or ""
@@ -138,7 +135,7 @@ def main():
         st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
 
         if not streaming_enabled:
-            reasoning_placeholder.write("\n".join(reasoning_tokens))
+            st.markdown("**Reasoning Tokens:**\n" + "\n".join(reasoning_tokens))
 
         if token_counting_enabled and usage_info:
             prompt_tokens = getattr(usage_info, "prompt_tokens", 0) or 0
