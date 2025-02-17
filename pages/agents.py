@@ -31,6 +31,9 @@ def get_langchain_agent(model_choice, system_prompt, verbose):
     Creates an agent that uses a custom prefix with chain-of-thought style 
     instructions (embedded in the prompt), while retaining the ability to 
     use tools in a ReAct-like manner.
+    
+    This version also incorporates the user-provided 'system_prompt' 
+    into the agent's overall instructions.
     """
     try:
         # Instantiate the AzureChatOpenAI LLM
@@ -55,8 +58,12 @@ def get_langchain_agent(model_choice, system_prompt, verbose):
 
         # ---------------------------------------------------------------------
         # 1) CREATE A CUSTOM PROMPT TEMPLATE (PREFIX + SUFFIX)
+        #    Incorporate the user-provided 'system_prompt' to give the model 
+        #    additional context or instructions.
         # ---------------------------------------------------------------------
-        CUSTOM_PREFIX = """You are a helpful AI assistant specialized in step-by-step reasoning (Chain-of-Thought).
+        CUSTOM_PREFIX = f"""{system_prompt}
+
+You are a helpful AI assistant specialized in step-by-step reasoning (Chain-of-Thought).
 Please reason through the problem carefully and derive the answer.
 
 Use the following format:
