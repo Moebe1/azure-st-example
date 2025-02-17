@@ -35,7 +35,7 @@ client = AzureOpenAI(
 # Tavily: optional for search
 # -------------------------------------------------------------------------
 tavily_api_key = st.secrets.get("TAVILY_API_KEY", "")
-search_api = TavilySearchAPIWrapper(api_key=tavily_api_key, max_results=5)
+search_api = search_api = TavilySearchAPIWrapper()
 tavily_tool = TavilySearchResults(api_wrapper=search_api, max_results=5)
 
 # -------------------------------------------------------------------------
