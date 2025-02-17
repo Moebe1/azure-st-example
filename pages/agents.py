@@ -131,10 +131,11 @@ def main():
                         reasoning_text = ""
                         for chunk in response_generator:
                             response_text += chunk
-                            if verbosity_enabled and unified_expander:
+                            if verbosity_enabled:
                                 reasoning_text += chunk
-                                unified_expander.markdown(reasoning_text.strip())
                             message_placeholder.markdown(response_text.strip())
+                        if verbosity_enabled and unified_expander:
+                            unified_expander.markdown(reasoning_text.strip())
                     else:
                         response_text = agent.run(prompt)
                         if verbosity_enabled:
