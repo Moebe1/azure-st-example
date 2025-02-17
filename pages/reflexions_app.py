@@ -1,23 +1,31 @@
 import streamlit as st
-from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import HumanMessage, ToolMessage
-from langchain_core.output_parsers.openai_tools import PydanticToolsParser
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from pydantic import BaseModel, Field, ValidationError
-from langchain_community.tools.tavily_search import TavilySearchResults
-from langchain_community.utilities.tavily_search import TavilySearchAPIWrapper
-import datetime
+from openai import AzureOpenAI, OpenAIError
 import re
+from pydantic import BaseModel, Field, ValidationError
+import datetime
 
 # =============================================================================
-# Configuration - LangGraph Reflexions Agent
+# Configuration - Azure OpenAI
 # =============================================================================
-TAVILY_API_KEY = st.secrets["TAVILY_API_KEY"]
-search = TavilySearchAPIWrapper(api_key=TAVILY_API_KEY)
-tavily_tool = TavilySearchResults(api_wrapper=search, max_results=5)
+AZURE_OPENAI_API_KEY = st.secrets["AZURE_OPENAI_API_KEY"]
+AZURE_OPENAI_ENDPOINT = st.secrets["AZURE_OPENAI_ENDPOINT"]
+AZURE_OPENAI_API_VERSION = st.secrets["AZURE_OPENAI_API_VERSION"]
 
-llm = ChatAnthropic(model="claude-3-5-sonnet-20240620")
+AVAILABLE_MODELS = [
+    "o1-mini",
+    "gpt-4o",
+    "gpt-4o-mini"
+]
 
+client = AzureOpenAI(
+    api_key=AZURE_OPENAI_API_KEY,
+    azure_endpoint=AZURE_OPENAI_ENDPOINT,
+    api_version=AZURE_OPENAI_API_VERSION
+)
+
+# =============================================================================
+# Reflexions Agent Components
+# =============================================================================
 class Reflection(BaseModel):
     missing: str = Field(description="Critique of what is missing.")
     superfluous: str = Field(description="Critique of what is superfluous.")
@@ -30,26 +38,17 @@ class AnswerQuestion(BaseModel):
 class ReviseAnswer(AnswerQuestion):
     references: list[str] = Field(description="Citations motivating your updated answer.")
 
-actor_prompt_template = ChatPromptTemplate.from_messages([
-    ("system", """You are an expert researcher. Current time: {time}
-1. {first_instruction}
-2. Reflect and critique your answer. Be severe to maximize improvement.
-3. Recommend search queries to research information and improve your answer."""),
-    MessagesPlaceholder(variable_name="messages"),
-    ("user", "Reflect on the user's original question and the actions taken thus far.")
-]).partial(time=lambda: datetime.datetime.now().isoformat())
-
-initial_answer_chain = actor_prompt_template.partial(
-    first_instruction="Provide a detailed ~250 word answer.",
-    function_name=AnswerQuestion.__name__,
-) | llm.bind_tools(tools=[AnswerQuestion])
-
-revision_chain = actor_prompt_template.partial(
-    first_instruction="Revise your original answer using the new information.",
-    function_name=ReviseAnswer.__name__,
-) | llm.bind_tools(tools=[ReviseAnswer])
-
-validator = PydanticToolsParser(tools=[AnswerQuestion, ReviseAnswer])
+def get_openai_response(messages, model_name):
+    try:
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=messages,
+            stream=False
+        )
+        return response
+    except OpenAIError as e:
+        st.error(f"OpenAI API Error: {str(e)}")
+        return None
 
 # =============================================================================
 # Main Streamlit App
@@ -68,6 +67,7 @@ def main():
 
     with st.sidebar:
         st.header("Configuration")
+        model_choice = st.selectbox("Select the Azure deployment:", AVAILABLE_MODELS, index=0)
         streaming_enabled = st.checkbox("Enable Streaming", value=False)
         token_counting_enabled = st.checkbox("Enable Token Counting", value=False)
         if st.button("Clear Conversation"):
@@ -90,17 +90,14 @@ def main():
             assistant_text = ""
             usage_info = None
 
-            if streaming_enabled:
-                with st.spinner("Thinking..."):
-                    response_generator = initial_answer_chain.invoke({"messages": st.session_state["messages"]})
-                    for update in response_generator:
-                        assistant_text += update
-                        message_placeholder.write(assistant_text)
-            else:
-                with st.spinner("Thinking..."):
-                    response = initial_answer_chain.invoke({"messages": st.session_state["messages"]})
-                    assistant_text = response["answer"]
-                    message_placeholder.write(assistant_text)
+            with st.spinner("Thinking..."):
+                response = get_openai_response(st.session_state["messages"], model_choice)
+                if not response:
+                    return
+                if response.choices and response.choices[0].message:
+                    assistant_text = response.choices[0].message.content or ""
+                usage_info = getattr(response, "usage", None)
+                message_placeholder.write(assistant_text)
 
             assistant_text = re.sub(r'[ \t]+$', '', assistant_text, flags=re.MULTILINE)
             assistant_text = re.sub(r'^\s*\n', '', assistant_text)
@@ -109,7 +106,17 @@ def main():
         st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
 
         if token_counting_enabled and usage_info:
-            st.write(f"Tokens Used: {usage_info}")
+            prompt_tokens = getattr(usage_info, "prompt_tokens", 0) or 0
+            completion_tokens = getattr(usage_info, "completion_tokens", 0) or 0
+            total_tokens = getattr(usage_info, "total_tokens", 0) or 0
+            st.session_state["total_tokens_used"] += total_tokens
+            st.write(
+                f"**Tokens Used**: "
+                f"Prompt={prompt_tokens}, "
+                f"Completion={completion_tokens}, "
+                f"Total={total_tokens} "
+                f"(Session Total={st.session_state['total_tokens_used']})"
+            )
 
 if __name__ == "__main__":
     main()
