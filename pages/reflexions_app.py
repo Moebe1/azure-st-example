@@ -44,6 +44,9 @@ class AnswerQuestion(BaseModel):
 class ReviseAnswer(AnswerQuestion):
     references: list[str] = Field(description="Citations motivating your updated answer.")
 
+# =============================================================================
+# Reflexion Actor Logic
+# =============================================================================
 def get_openai_response(messages, model_name, streaming_enabled):
     try:
         if streaming_enabled:
