@@ -38,10 +38,10 @@ Problem: {input_question}
 Let's break down the steps to solve this:
 
 Step-by-Step Reasoning:
-1) Think carefully about the problem.
-2) List possible approaches or relevant information.
-3) Perform any calculations or expansions as needed.
-4) Arrive at the best possible conclusion.
+1) Analyze the question and identify key concepts or themes.
+2) Explore relevant theories, facts, or approaches to address the question.
+3) Synthesize the information logically to form a coherent understanding.
+4) Derive a concise and accurate conclusion based on the reasoning process.
 
 Final Answer:
 """
@@ -128,11 +128,13 @@ def main():
                     if streaming_enabled and model_choice != "o1-mini":
                         response_generator = agent.run(prompt)
                         unified_expander = st.expander("Agent's Reasoning and Response", expanded=True) if verbosity_enabled else None
+                        reasoning_text = ""
                         for chunk in response_generator:
                             response_text += chunk
                             if verbosity_enabled and unified_expander:
-                                unified_expander.markdown(chunk)
-                            message_placeholder.markdown(response_text)
+                                reasoning_text += chunk
+                                unified_expander.markdown(reasoning_text.strip())
+                            message_placeholder.markdown(response_text.strip())
                     else:
                         response_text = agent.run(prompt)
                         if verbosity_enabled:
