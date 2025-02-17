@@ -102,23 +102,6 @@ def get_openai_response(messages, model_name):
                 {
                     "type": "function",
                     "function": {
-                        "name": "calculate",
-                        "description": "Evaluates a mathematical expression and returns the result.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "expression": {
-                                    "type": "string",
-                                    "description": "The mathematical expression to evaluate."
-                                }
-                            },
-                            "required": ["expression"]
-                        }
-                    }
-                },
-                {
-                    "type": "function",
-                    "function": {
                         "name": "tavily_search_results_json",
                         "description": "Useful for when you need to answer questions about current events. Input should be a search query.",
                         "parameters": {
@@ -143,9 +126,6 @@ def get_openai_response(messages, model_name):
 
 def process_response(response):
     assistant_text = ""
-    btc_price = None
-    energy_article_summary = None
-
     if response and response.choices and response.choices[0].message:
         message = response.choices[0].message
         assistant_text = message.content or ""
@@ -160,42 +140,15 @@ def process_response(response):
                 logging.info(f"Function Name: {function_name}, Arguments: {function_args}")
 
                 try:
-                    if function_name == "tavily_search_results_json" and "Bitcoin price" in function_args:
+                    if function_name == "tavily_search_results_json":
                         query = eval(function_args)['query']
                         search_results = tavily_search.run(query)
-                        # Extract Bitcoin price from search results
                         if search_results and isinstance(search_results, list):
-                            for result in search_results:
-                                if isinstance(result, dict) and "content" in result:
-                                    price_match = re.search(r"[\$\d,]+", result["content"])
-                                    if price_match:
-                                        btc_price = price_match.group(0)
-                                        assistant_text += f"\n\nCurrent Bitcoin price: {btc_price}"
-                                        break # Stop after finding the first price
+                            # Concatenate the content of all search results
+                            combined_content = "\n".join([result.get("content", "") for result in search_results if isinstance(result, dict)])
+                            assistant_text = f"Search results: {combined_content}"
                         else:
-                            assistant_text += "\n\nCould not find Bitcoin price in search results."
-
-
-                    elif function_name == "calculate" and btc_price:
-                        expression = f"{btc_price.replace('$', '').replace(',', '')} * 0.15"
-                        result = calculate(expression)
-                        assistant_text += f"\n\n15% of the Bitcoin price: {result}"
-
-                    elif function_name == "tavily_search_results_json" and "energy consumption" in function_args:
-                        query = eval(function_args)['query']
-                        search_results = tavily_search.run(query)
-                        # Extract URL of the first article
-                        if search_results and isinstance(search_results, list):
-                            for result in search_results:
-                                if isinstance(result, dict) and "url" in result:
-                                    url = result["url"]
-                                    energy_article_summary = summarize_document(url)
-                                    assistant_text += f"\n\nSummary of Bitcoin energy consumption article: {energy_article_summary}"
-                                    break # Stop after summarizing the first article
-                        else:
-                            assistant_text += "\n\nCould not find Bitcoin energy consumption article."
-
-
+                            assistant_text = "\n\nCould not find relevant information in search results."
                 except Exception as e:
                     assistant_text += f"\n\nError processing tool call: {function_name} - {str(e)}"
                     logging.error(f"Error processing tool call: {function_name} - {str(e)}")
@@ -240,18 +193,11 @@ def main():
 
             # Initial response
             with st.spinner("Thinking..."):
-                initial_prompt = f"""You are a helpful AI assistant. You have access to the following tools:
-                - calculate: Evaluates a mathematical expression and returns the result.
+                initial_prompt = f"""You are a helpful AI assistant. You have access to the following tool:
                 - tavily_search_results_json: Searches the web and returns results.
 
-                Solve the following problem: 
-                1. Use the tavily_search_results_json tool to find the current price of Bitcoin in USD.
-                2. Use the calculate tool to calculate 15% of that price.
-                3. Use the tavily_search_results_json tool to find a recent news article about Bitcoin's energy consumption.
-                4. Summarize the key points from the news article.
-                5. Combine all the information to provide a final answer that includes the current price of Bitcoin, 15% of that price, and a summary of a recent news article about Bitcoin's energy consumption.
-
-                You must use the tools provided to answer the question.
+                When the user asks a question, use the tavily_search_results_json tool to search for relevant information.
+                Then, based on the search results, provide a concise and accurate answer to the user's question.
                 """
                 messages = [{"role": "user", "content": initial_prompt}]
                 response = get_openai_response(messages, model_choice)
