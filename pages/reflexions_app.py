@@ -46,19 +46,28 @@ class ReviseAnswer(AnswerQuestion):
 
 def get_openai_response(messages, model_name, streaming_enabled):
     try:
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=messages,
-            stream=streaming_enabled
-        )
-        reasoning_tokens = []
         if streaming_enabled:
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+                stream=True
+            )
+            reasoning_tokens = []
             for chunk in response:
                 if "choices" in chunk and chunk["choices"]:
-                    reasoning_tokens.append(chunk["choices"][0].get("delta", {}).get("content", ""))
+                    delta_content = chunk["choices"][0].get("delta", {}).get("content", "")
+                    if delta_content:
+                        reasoning_tokens.append(delta_content)
+                        yield delta_content  # Yield each token for real-time updates
+            return None, reasoning_tokens
         else:
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=messages,
+                stream=False
+            )
             reasoning_tokens = response.choices[0].message.content.split("\n")
-        return response, reasoning_tokens
+            return response, reasoning_tokens
     except OpenAIError:
         st.error("An error occurred while communicating with the OpenAI API. Please try again.")
         return None, []
@@ -108,13 +117,19 @@ def main():
             usage_info = None
 
             with st.spinner("Thinking..."):
-                response, reasoning_tokens = get_openai_response(st.session_state["messages"], model_choice, streaming_enabled)
-                if not response:
-                    return
-                if response.choices and response.choices[0].message:
-                    assistant_text = response.choices[0].message.content or ""
-                usage_info = getattr(response, "usage", None)
-                message_placeholder.write(assistant_text)
+                if streaming_enabled:
+                    reasoning_tokens = []
+                    for token in get_openai_response(st.session_state["messages"], model_choice, streaming_enabled):
+                        reasoning_tokens.append(token)
+                        reasoning_placeholder.write("".join(reasoning_tokens))
+                else:
+                    response, reasoning_tokens = get_openai_response(st.session_state["messages"], model_choice, streaming_enabled)
+                    if not response:
+                        return
+                    if response.choices and response.choices[0].message:
+                        assistant_text = response.choices[0].message.content or ""
+                    usage_info = getattr(response, "usage", None)
+                    message_placeholder.write(assistant_text)
 
             assistant_text = re.sub(r'[ \t]+$', '', assistant_text, flags=re.MULTILINE)
             assistant_text = re.sub(r'^\s*\n', '', assistant_text)
@@ -122,7 +137,7 @@ def main():
 
         st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
 
-        if streaming_enabled:
+        if not streaming_enabled:
             reasoning_placeholder.write("\n".join(reasoning_tokens))
 
         if token_counting_enabled and usage_info:
