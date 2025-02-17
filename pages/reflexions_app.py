@@ -121,10 +121,15 @@ def main():
                     reasoning_placeholder = st.empty()
                     for token in reasoning_data:
                         reasoning_tokens.append(token)
-                        reasoning_placeholder.markdown("**Reasoning Tokens:**\n" + "".join(reasoning_tokens))
+                        reasoning_placeholder.markdown("**Reflection Tokens:**\n" + "".join(reasoning_tokens))
                 else:
                     if response.choices and response.choices[0].message:
                         assistant_text = response.choices[0].message.content or ""
+                        # Parse reflection tokens if present
+                        reflection_data = response.choices[0].message.get("reflection", {})
+                        if reflection_data:
+                            reflection_text = f"**Missing:** {reflection_data.get('missing', '')}\n\n**Superfluous:** {reflection_data.get('superfluous', '')}"
+                            st.markdown("**Reflection Tokens:**\n" + reflection_text)
                     usage_info = getattr(response, "usage", None)
                     message_placeholder.write(assistant_text)
 
@@ -135,7 +140,7 @@ def main():
         st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
 
         if not streaming_enabled:
-            st.markdown("**Reasoning Tokens:**\n" + "\n".join(reasoning_tokens))
+            st.markdown("**Reflection Tokens:**\n" + "\n".join(reasoning_tokens))
 
         if token_counting_enabled and usage_info:
             prompt_tokens = getattr(usage_info, "prompt_tokens", 0) or 0
