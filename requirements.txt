@@ -3,7 +3,9 @@ streamlit-extras
 openai
 markdown2
 markdown
-langchain
+langchain>=0.0.289
 langchain_community
 langchain_openai
 langchain-experimental
+langgraph
+tavily-python
