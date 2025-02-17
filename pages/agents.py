@@ -39,7 +39,8 @@ def get_langchain_agent(model_choice, system_prompt, verbose):
             openai_api_key=AZURE_OPENAI_API_KEY,
             azure_endpoint=AZURE_OPENAI_ENDPOINT,
             openai_api_version=AZURE_OPENAI_API_VERSION,
-            streaming=True if model_choice != "o1-mini" else False
+            streaming=True if model_choice != "o1-mini" else False,
+            temperature=0.9
         )
 
         # Define any tools you want the agent to use
