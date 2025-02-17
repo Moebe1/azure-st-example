@@ -102,6 +102,40 @@ def get_openai_response(messages, model_name):
                 {
                     "type": "function",
                     "function": {
+                        "name": "calculate",
+                        "description": "Evaluates a mathematical expression and returns the result.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "expression": {
+                                    "type": "string",
+                                    "description": "The mathematical expression to evaluate."
+                                }
+                            },
+                            "required": ["expression"]
+                        }
+                    }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "summarize_document",
+                        "description": "Summarizes the content of a document at a given URL.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "url": {
+                                    "type": "string",
+                                    "description": "The URL of the document to summarize."
+                                }
+                            },
+                            "required": ["url"]
+                        }
+                    }
+                },
+                {
+                    "type": "function",
+                    "function": {
                         "name": "tavily_search_results_json",
                         "description": "Useful for when you need to answer questions about current events. Input should be a search query.",
                         "parameters": {
@@ -129,20 +163,6 @@ def process_response(response):
     if response and response.choices and response.choices[0].message:
         message = response.choices[0].message
         assistant_text = message.content or ""
-
-        # Check for tool calls
-        if message.tool_calls:
-            for tool_call in message.tool_calls:
-                function_name = tool_call.function.name
-                function_args = tool_call.function.arguments
-
-                try:
-                    if function_name == "tavily_search_results_json":
-                        query = eval(function_args)['query']
-                        search_results = tavily_search.run(query)
-                        assistant_text += f"\n\nBased on the search results, the capital of France is Paris." #Simplified response
-                except Exception as e:
-                    assistant_text += f"\n\nError processing tool call: {function_name} - {str(e)}"
     return assistant_text
 
 # =============================================================================
@@ -181,11 +201,14 @@ def main():
 
             # Initial response
             with st.spinner("Thinking..."):
-                initial_prompt = f"""You are a helpful AI assistant. You have access to the following tool:
+                initial_prompt = f"""You are a helpful AI assistant. You have access to the following tools:
+                - calculate: Evaluates a mathematical expression and returns the result.
+                - summarize_document: Summarizes the content of a document at a given URL.
                 - tavily_search_results_json: Searches the web and returns results.
 
-                Use the tavily_search_results_json tool to search for "capital of France".
-                Based on the search results, provide a concise answer to the question: What is the capital of France?
+                Solve the following problem: What is the current price of Bitcoin in USD? Calculate 15% of that price. Then, find a recent news article about Bitcoin's energy consumption and summarize its key points.
+
+                You must use the tools provided to answer the question.
                 """
                 messages = [{"role": "user", "content": initial_prompt}]
                 response = get_openai_response(messages, model_choice)
