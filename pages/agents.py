@@ -209,9 +209,12 @@ from langchain_core.runnables import chain as chain_runnable
 from langchain_core.output_parsers.openai_tools import PydanticToolsParser
 
 reflection_llm = ChatOpenAI(
-    model_name="gpt-4o",  # or you can map your azure_deployment as needed
-    temperature=0.1
-)
+    azure_deployment=model_choice,
+    openai_api_key=AZURE_OPENAI_API_KEY,
+    azure_endpoint=AZURE_OPENAI_ENDPOINT,
+    openai_api_version=AZURE_OPENAI_API_VERSION,
+        temperature=0.1
+    )
 
 reflection_parser = PydanticToolsParser(tools=[Reflection])
 
