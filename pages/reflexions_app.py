@@ -193,13 +193,7 @@ def main():
 
             # Initial response
             with st.spinner("Thinking..."):
-                initial_prompt = f"""You are a helpful AI assistant. You have access to the following tool:
-                - tavily_search_results_json: Searches the web and returns results.
-
-                When the user asks a question, use the tavily_search_results_json tool to search for relevant information.
-                Then, based on the search results, provide a concise and accurate answer to the user's question.
-                """
-                messages = [{"role": "user", "content": initial_prompt}]
+                messages = st.session_state["messages"]
                 response = get_openai_response(messages, model_choice)
                 assistant_text = process_response(response)
 
