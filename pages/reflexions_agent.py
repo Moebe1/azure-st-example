@@ -6,12 +6,8 @@ from typing import Optional, Literal, List, Dict, Any
 import json
 
 ############################################################
-# NOTE TO READER:
-# This code uses a "Reflexion" approach (LangGraph), ensuring
-# that we never produce invalid "messages" entries for Azure.
-# We store tool calls in a separate "tool_calls" field.
-# The key fix is giving each node (including the tool node)
-# a transform that returns a dict with "messages" & "tool_calls".
+# REFLEXION AGENT CODE (LangGraph), NO transform= param
+# We use a separate "merge" node to handle the tool output.
 ############################################################
 
 # =============================================================================
@@ -20,12 +16,12 @@ import json
 st.set_page_config(page_title="Reflexion Agent", page_icon="🤖")
 from openai import AzureOpenAI, OpenAIError
 
-# Távily
+# Távily imports
 from langchain_community.utilities.tavily_search import TavilySearchAPIWrapper
 from langchain_community.tools.tavily_search import TavilySearchResults
 
 # LangGraph
-from langgraph.graph import StateGraph, START, END
+from langgraph.graph import StateGraph, START, END, Node
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from langchain_core.messages import AIMessage, HumanMessage
@@ -47,7 +43,6 @@ TAVILY_API_KEY = st.secrets.get("TAVILY_API_KEY", "")
 
 os.environ["TAVILY_API_KEY"] = TAVILY_API_KEY  # Távily uses environment var
 
-# List of available Azure deployments
 AVAILABLE_MODELS = [
     "o1-mini",
     "gpt-4o",
@@ -68,7 +63,6 @@ search_api = TavilySearchAPIWrapper()
 tavily_tool = TavilySearchResults(api_wrapper=search_api)
 tavily_tool.max_results = 5  # if allowed
 
-# We'll define a structured "search" function that the reflexion agent can call:
 def run_tavily(queries: list[str]) -> list[dict]:
     """Run Távily search for each query in 'queries', returning a list of results."""
     outputs = []
@@ -78,40 +72,33 @@ def run_tavily(queries: list[str]) -> list[dict]:
     return outputs
 
 class ReflexionToolInput(BaseModel):
-    search_queries: List[str] = Field(description="Search queries to improve or refine the answer")
+    search_queries: List[str] = Field(description="Search queries to improve the answer")
 
 @StructuredTool.from_function
 def reflexion_search(search_queries: List[str]) -> list[dict]:
     """
-    Távily search invocation function used by the Reflexion agent.
-    Returns a list of { query, results } dicts.
+    Távily tool function that returns a list of { query, results }
     """
     return run_tavily(search_queries)
 
 # =============================================================================
-# Reflection Actor Data Models
+# Reflexion Actor data
 # =============================================================================
 class ReflectionCritique(BaseModel):
-    missing: str = Field(description="Critique of what is missing from the answer.")
-    superfluous: str = Field(description="Critique of any extraneous info in the answer.")
+    missing: str
+    superfluous: str
 
 class ReflexionAnswer(BaseModel):
-    """
-    For the reflexion-based approach, we ask the model to produce:
-      1) 'answer': the actual text
-      2) 'reflection': ReflectionCritique
-      3) 'search_queries': up to 3 queries for Távily
-    """
-    answer: str = Field(description="A ~250 word answer to the user's question.")
+    answer: str
     reflection: ReflectionCritique
     search_queries: List[str]
 
-# Prompt for the "actor"
 SYSTEM_INSTRUCTIONS = """You are a 'Reflexion' AI assistant specialized in step-by-step refinement.
-1. Provide an answer to the user's question (~250 words).
-2. Provide a reflection about missing info or superfluous content.
-3. Provide 1-3 search queries to help refine or expand the answer if needed.
-Make sure your final answer is relevant and addresses the question thoroughly but concisely."""
+1. Provide a ~250 word answer to the user's question.
+2. Provide reflection about missing info or superfluous content.
+3. Provide 1-3 search queries to help refine or expand if needed.
+Return valid JSON for the ReflexionAnswer model.
+"""
 
 ACTOR_PROMPT = ChatPromptTemplate.from_messages(
     [
@@ -123,30 +110,23 @@ ACTOR_PROMPT = ChatPromptTemplate.from_messages(
 
 parser = JsonOutputToolsParser(return_id=True)
 
-# We'll store both messages and "tool_calls" in the state, to avoid mixing them.
-
 class ReflexionState(TypedDict):
-    messages: List[dict]
-    tool_calls: List[dict]
-
+    messages: List[dict]   # valid chat messages
+    tool_calls: List[dict] # parser outputs (lack 'role')
 
 # =============================================================================
-# CHAIN: reflexion_chain
+# reflexion_chain
 # =============================================================================
 @chain_runnable
 def reflexion_chain(inputs: Dict, config: RunnableConfig):
     """
-    We generate a single response from the model,
-    returning { "messages": [...], "tool_calls": [...] }
-    so that 'messages' are valid chat messages, each with role/content,
-    and 'tool_calls' are the parser outputs that might lack 'role'.
+    We pass 'messages' to Azure,
+    parse the AI's JSON => store in 'tool_calls'
     """
     model_name = config["configurable"].get("model_name", "gpt-4o")
     max_tokens = config["configurable"].get("max_tokens", 512)
-    verbose = config["configurable"].get("verbose", False)
-
-    # Build final prompt using the 'messages' from the state
     chat_val = ACTOR_PROMPT.format_prompt(messages=inputs["messages"])
+
     resp = client.chat.completions.create(
         model=model_name,
         messages=chat_val.to_messages(),
@@ -154,7 +134,6 @@ def reflexion_chain(inputs: Dict, config: RunnableConfig):
         max_tokens=max_tokens,
         stream=False
     )
-
     usage = getattr(resp, "usage", None)
     if usage and "total_tokens_used" in st.session_state:
         st.session_state["total_tokens_used"] += usage.total_tokens
@@ -166,77 +145,82 @@ def reflexion_chain(inputs: Dict, config: RunnableConfig):
             "tool_calls": []
         }
 
-    # 'ai_msg' is what we push into messages
     ai_msg = resp.choices[0].message.to_dict()  # {role=assistant, content=...}
-
-    # parse the tool calls
-    parsed = parser.invoke(ai_msg)  # might yield [ {"name":..., "type":"tool_call", ...}, ...]
+    parsed = parser.invoke(ai_msg)  # the tool calls
 
     return {
-        "messages": [ai_msg],  # only the single AI message
-        "tool_calls": parsed   # store the tool calls separately
+        "messages": [ai_msg],
+        "tool_calls": parsed
     }
 
+# =============================================================================
+# Tool Node (no transform param!)
+# We'll rely on the default behavior, which returns a dict like:
+# { "messages": inputs["messages"], "tool_result": <your tool output> }
+# We'll have to merge that in a separate node.
+# =============================================================================
+tool_node = ToolNode(tools=[reflexion_search])
 
 # =============================================================================
-# We define the tool node with a custom transform
-# so that it merges the tool output (the Távily search results) back into the state
-# as additional info, or an assistant message, etc.
+# We define a "merge" node to wrap tool output in an assistant message
 # =============================================================================
-def tool_transform(state: ReflexionState, tool_result: list):
-    """
-    We have the Távily search output as 'tool_result',
-    which is a list of { "query":..., "results":... }.
+class MergeNode(Node):
+    def run_node(self, state: ReflexionState, config: dict):
+        """
+        The default tool_node might produce something like:
+          { "messages": <unchanged msg>, "tool_result": [ ... ] }
+        We'll convert that tool_result into an assistant message, then
+        combine with existing 'messages'.
+        """
+        prev_messages = state["messages"]
+        tool_result = state.get("tool_result", None)
+        tool_calls = state.get("tool_calls", [])
 
-    We'll wrap it as an assistant message or something so that
-    it's all still valid for the next chain call.
-    """
-    # build a new "assistant" message that summarizes the search results
-    # or just store them in the 'tool_calls' if we prefer. But we typically want to
-    # add them to 'messages' so the next chain can see them.
-    # We'll keep it simple: add a single assistant message with the JSON content.
+        if tool_result is None:
+            # no new results, so return as-is
+            return {
+                "messages": prev_messages,
+                "tool_calls": tool_calls
+            }
 
-    text_summary = f"Tool Results: {json.dumps(tool_result, indent=2)}"
-    new_msg = {
-        "role": "assistant",
-        "content": text_summary
-    }
+        # wrap tool_result in an assistant message
+        text_summary = "Tool Results:\n" + json.dumps(tool_result, indent=2)
+        new_msg = {
+            "role": "assistant",
+            "content": text_summary
+        }
 
-    return {
-        "messages": state["messages"] + [new_msg],
-        "tool_calls": state["tool_calls"]
-    }
+        updated_msgs = prev_messages + [new_msg]
+        return {
+            "messages": updated_msgs,
+            "tool_calls": tool_calls
+        }
 
-tool_node = ToolNode(
-    tools=[reflexion_search],
-    # The transform merges the Távily result into the same shape
-    transform=tool_transform
-)
+merge_node = MergeNode("merge_node")
 
-
-# =============================================================================
-# We'll define "revision_chain" = reflexion_chain for second pass
-# =============================================================================
+# We'll define the revision chain the same as reflexion_chain
 revision_chain = reflexion_chain
-
 
 # =============================================================================
 # BUILD THE GRAPH
+# draft -> tool -> merge -> revise -> possibly loop or end
 # =============================================================================
 builder = StateGraph(ReflexionState)
 builder.add_node("draft", reflexion_chain)
 builder.add_node("tool", tool_node)
+builder.add_node("merge", merge_node)
 builder.add_node("revise", revision_chain)
 
 builder.add_edge(START, "draft")
 builder.add_edge("draft", "tool")
-builder.add_edge("tool", "revise")
+builder.add_edge("tool", "merge")
+builder.add_edge("merge", "revise")
 
 MAX_ITERATIONS = 3
 
 def reflexion_loop(state: ReflexionState) -> str:
-    # We'll see how many expansions we've done by counting 'tool_call'
     expansions = 0
+    # each time the model returns an item with "type": "tool_call", increment expansions
     for tc in state.get("tool_calls", []):
         if tc.get("type") == "tool_call":
             expansions += 1
@@ -247,23 +231,19 @@ def reflexion_loop(state: ReflexionState) -> str:
 builder.add_conditional_edges("revise", reflexion_loop, ["tool", END])
 reflexion_graph = builder.compile()
 
-
 # =============================================================================
-# For user code
+# The "get_langchain_agent" for code-compatibility
 # =============================================================================
 def get_langchain_agent(model_choice: str, system_prompt: str, verbose: bool):
-    """
-    Re-implements the get_langchain_agent but now as a Reflexion agent, 
-    using the same signature so we do not break the existing code or API.
-    """
-    # We ignore system_prompt or incorporate it if we want
+    # ignoring system_prompt or incorporate it if you want
     return reflexion_graph
 
-
+# =============================================================================
+# The main streamlit app
+# =============================================================================
 def main():
-    st.title("Reflexion Agent with Távily Search + Azure + Token Counting")
+    st.title("Reflexion Agent (No transform param)")
 
-    # initialize session state
     if "messages" not in st.session_state:
         st.session_state["messages"] = [
             {"role": "assistant", "content": "Hello! I'm a Reflexion-based AI. How can I help?"}
@@ -277,12 +257,9 @@ def main():
         st.header("Configuration")
         model_choice = st.selectbox("Azure Model:", AVAILABLE_MODELS, index=0)
         system_prompt = st.text_area("System Prompt", "You are an AI assistant.")
-        streaming_enabled = st.checkbox("Enable Streaming", value=False)
         verbosity_enabled = st.checkbox("Enable Verbose Mode", value=False)
         max_tokens = st.number_input("Max Tokens per Response", min_value=50, max_value=4096, value=500)
-
         st.write("**Total Tokens Used**:", st.session_state["total_tokens_used"])
-
         if st.button("Clear Conversation"):
             st.session_state["messages"] = [
                 {"role": "assistant", "content": "Conversation cleared. How can I help now?"}
@@ -291,7 +268,7 @@ def main():
             st.session_state["total_tokens_used"] = 0
             st.experimental_rerun()
 
-    # display existing conversation
+    # Display conversation
     for msg in st.session_state["messages"]:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
@@ -303,13 +280,11 @@ def main():
 
         with st.chat_message("assistant"):
             msg_placeholder = st.empty()
-            # Build the reflexion state
             reflexion_state: ReflexionState = {
                 "messages": st.session_state["messages"],
                 "tool_calls": st.session_state["tool_calls"]
             }
 
-            # run the graph
             agent = get_langchain_agent(model_choice, system_prompt, verbosity_enabled)
             config = {
                 "configurable": {
@@ -319,32 +294,30 @@ def main():
                 }
             }
 
-            response_text = ""
+            final_answer = ""
             try:
-                # .stream(..., stream_mode="values") returns step outputs
+                # run the graph with .stream(..., stream_mode="values")
                 for step_output in agent.stream(reflexion_state, stream_mode="values", config=config):
                     node_name, node_data = next(iter(step_output.items()))
                     reflexion_state = node_data  # updated state
 
-                # find the last assistant message
-                final_msg = ""
+                # read last assistant message
                 for msg_ in reversed(reflexion_state["messages"]):
                     if msg_.get("role") == "assistant":
-                        final_msg = msg_.get("content", "")
+                        final_answer = msg_.get("content", "")
                         break
 
-                final_msg = re.sub(r'[ \t]+$', '', final_msg, flags=re.MULTILINE)
-                final_msg = re.sub(r'^\s*\n', '', final_msg)
-                final_msg = re.sub(r'\n\s*$', '', final_msg)
+                # clean whitespace
+                final_answer = re.sub(r'[ \t]+$', '', final_answer, flags=re.MULTILINE)
+                final_answer = re.sub(r'^\s*\n', '', final_answer)
+                final_answer = re.sub(r'\n\s*$', '', final_answer)
+                msg_placeholder.write(final_answer)
 
-                response_text = final_msg
-                msg_placeholder.write(final_msg)
             except Exception as e:
                 st.error(f"Error: {e}")
-                response_text = "I encountered an error. Please try again."
+                final_answer = "I encountered an error, sorry."
 
-        # update session state
-        st.session_state["messages"].append({"role": "assistant", "content": response_text})
+        st.session_state["messages"].append({"role": "assistant", "content": final_answer})
         st.session_state["tool_calls"] = reflexion_state["tool_calls"]
 
 
