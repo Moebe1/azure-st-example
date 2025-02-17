@@ -44,17 +44,24 @@ class AnswerQuestion(BaseModel):
 class ReviseAnswer(AnswerQuestion):
     references: list[str] = Field(description="Citations motivating your updated answer.")
 
-def get_openai_response(messages, model_name):
+def get_openai_response(messages, model_name, streaming_enabled):
     try:
         response = client.chat.completions.create(
             model=model_name,
             messages=messages,
-            stream=False
+            stream=streaming_enabled
         )
-        return response
+        reasoning_tokens = []
+        if streaming_enabled:
+            for chunk in response:
+                if "choices" in chunk and chunk["choices"]:
+                    reasoning_tokens.append(chunk["choices"][0].get("delta", {}).get("content", ""))
+        else:
+            reasoning_tokens = response.choices[0].message.content.split("\n")
+        return response, reasoning_tokens
     except OpenAIError:
         st.error("An error occurred while communicating with the OpenAI API. Please try again.")
-        return None
+        return None, []
 
 # =============================================================================
 # Main Streamlit App
@@ -82,6 +89,10 @@ def main():
             ]
             st.session_state["total_tokens_used"] = 0
 
+    reasoning_tokens = []
+    with st.expander("Reasoning Tokens", expanded=True):
+        reasoning_placeholder = st.empty()
+
     for msg in st.session_state["messages"]:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
@@ -97,7 +108,7 @@ def main():
             usage_info = None
 
             with st.spinner("Thinking..."):
-                response = get_openai_response(st.session_state["messages"], model_choice)
+                response, reasoning_tokens = get_openai_response(st.session_state["messages"], model_choice, streaming_enabled)
                 if not response:
                     return
                 if response.choices and response.choices[0].message:
@@ -110,6 +121,9 @@ def main():
             assistant_text = re.sub(r'\n\s*$', '', assistant_text)
 
         st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
+
+        if streaming_enabled:
+            reasoning_placeholder.write("\n".join(reasoning_tokens))
 
         if token_counting_enabled and usage_info:
             prompt_tokens = getattr(usage_info, "prompt_tokens", 0) or 0
