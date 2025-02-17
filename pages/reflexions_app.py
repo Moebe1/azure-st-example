@@ -123,12 +123,12 @@ def main():
                         reasoning_tokens.append(token)
                         reasoning_placeholder.markdown("**Reflection Tokens:**\n" + "".join(reasoning_tokens))
                 else:
-                    if response.choices and response.choices[0].message:
+                    if response.choices and hasattr(response.choices[0].message, "content"):
                         assistant_text = response.choices[0].message.content or ""
                         # Parse reflection tokens if present
-                        reflection_data = response.choices[0].message.get("reflection", {})
-                        if reflection_data:
-                            reflection_text = f"**Missing:** {reflection_data.get('missing', '')}\n\n**Superfluous:** {reflection_data.get('superfluous', '')}"
+                        if hasattr(response.choices[0].message, "reflection"):
+                            reflection_data = response.choices[0].message.reflection
+                            reflection_text = f"**Missing:** {getattr(reflection_data, 'missing', '')}\n\n**Superfluous:** {getattr(reflection_data, 'superfluous', '')}"
                             st.markdown("**Reflection Tokens:**\n" + reflection_text)
                     usage_info = getattr(response, "usage", None)
                     message_placeholder.write(assistant_text)
