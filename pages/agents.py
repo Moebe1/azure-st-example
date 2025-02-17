@@ -39,9 +39,10 @@ Let's break down the steps to solve this:
 
 Step-by-Step Reasoning:
 1) Analyze the question and identify key concepts or themes.
-2) Explore relevant theories, facts, or approaches to address the question.
-3) Synthesize the information logically to form a coherent understanding.
-4) Derive a concise and accurate conclusion based on the reasoning process.
+2) Consider diverse perspectives, including relevant theories, facts, or approaches.
+3) Provide detailed explanations and illustrative examples or analogies to clarify the reasoning.
+4) Synthesize the information logically to form a unified and coherent understanding.
+5) Derive a concise and accurate conclusion based on the reasoning process.
 
 Final Answer:
 """
@@ -135,7 +136,9 @@ def main():
                                 reasoning_text += chunk
                             message_placeholder.markdown(response_text.strip())
                         if verbosity_enabled and unified_expander:
-                            unified_expander.markdown(reasoning_text.strip())
+                            # Post-process reasoning text to form a unified, polished paragraph
+                            refined_reasoning = " ".join(reasoning_text.splitlines()).strip()
+                            unified_expander.markdown(refined_reasoning)
                     else:
                         response_text = agent.run(prompt)
                         if verbosity_enabled:
