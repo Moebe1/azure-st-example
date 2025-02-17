@@ -100,17 +100,17 @@ def main():
                 try:
                     if streaming_enabled and model_choice != "o1-mini":
                         response_generator = agent.run(prompt)
+                        reasoning_expander = st.expander("View Agent's Reasoning", expanded=True) if verbosity_enabled else None
                         for chunk in response_generator:
                             response_text += chunk
-                            if verbosity_enabled:
-                                with st.expander("View Agent's Reasoning", expanded=False):
-                                    st.write(chunk)
+                            if verbosity_enabled and reasoning_expander:
+                                reasoning_expander.write(chunk)
                             message_placeholder.write(response_text)
                     else:
                         response_text = agent.run(prompt)
                         if verbosity_enabled:
-                            with st.expander("View Agent's Reasoning", expanded=False):
-                                st.write(response_text)
+                            reasoning_expander = st.expander("View Agent's Reasoning", expanded=True)
+                            reasoning_expander.write(response_text)
                         message_placeholder.write(response_text)
                 except Exception as e:
                     error_message = str(e)
