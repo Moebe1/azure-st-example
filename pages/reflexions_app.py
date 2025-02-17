@@ -170,16 +170,21 @@ def process_response(response):
                 function_name = tool_call.function.name
                 function_args = tool_call.function.arguments
 
-                if function_name == "calculate":
-                    expression = eval(function_args)['expression']
-                    assistant_text += f"\n\nCalculating: {expression} = {calculate(expression)}"
-                elif function_name == "summarize_document":
-                    url = eval(function_args)['url']
-                    assistant_text += f"\n\nSummarizing document at {url}: {summarize_document(url)}"
-                elif function_name == "tavily_search_results_json":
-                    query = eval(function_args)['query']
-                    search_results = tavily_search.run(query)
-                    assistant_text += f"\n\nTavily Search Results: {search_results}"
+                try:
+                    if function_name == "calculate":
+                        expression = eval(function_args)['expression']
+                        result = calculate(expression)
+                        assistant_text += f"\n\nCalculating: {expression} = {result}"
+                    elif function_name == "summarize_document":
+                        url = eval(function_args)['url']
+                        result = summarize_document(url)
+                        assistant_text += f"\n\nSummarizing document at {url}: {result}"
+                    elif function_name == "tavily_search_results_json":
+                        query = eval(function_args)['query']
+                        search_results = tavily_search.run(query)
+                        assistant_text += f"\n\nTavily Search Results: {search_results}"
+                except Exception as e:
+                    assistant_text += f"\n\nError processing tool call: {function_name} - {str(e)}"
     return assistant_text
 
 # =============================================================================
@@ -223,7 +228,7 @@ def main():
                 - summarize_document: Summarizes the content of a document at a given URL.
                 - tavily_search_results_json: Searches the web and returns results.
 
-                Solve the following problem: {prompt}
+                Solve the following problem: What is the capital of France?
                 After providing the answer, reflect on what is missing or superfluous in your response.
                 """
                 messages = [{"role": "user", "content": initial_prompt}]
