@@ -1,89 +1,61 @@
 import os
 import math
-from collections import deque, defaultdict
+import re
 from typing import Optional, Literal
+from collections import deque, defaultdict
 
 import streamlit as st
-from getpass import getpass
+from openai import AzureOpenAI, OpenAIError
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 1. INSTALL / IMPORT LANGCHAIN + LANGGRAPH + TAVILY
-#    Make sure you have them installed:
-#    pip install --upgrade langchain langgraph langchain_openai tavily-python
-# ─────────────────────────────────────────────────────────────────────────────
-
-# langgraph imports
-from langgraph.graph import START, END, StateGraph
-from langgraph.prebuilt import ToolNode
-
-# langchain (core) + additional
-from langchain_core.output_parsers.openai_tools import (
-    JsonOutputToolsParser,
-    PydanticToolsParser,
-)
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.prompt_values import ChatPromptValue
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
-from langchain_core.runnables import chain as as_runnable, RunnableConfig
-
-# langchain_openai for Azure or normal
-from langchain_openai import ChatOpenAI
-
-# Tools: Tavily search
-from langchain_community.tools.tavily_search import TavilySearchResults
+# Tavily tool
 from langchain_community.utilities.tavily_search import TavilySearchAPIWrapper
+from langchain_community.tools.tavily_search import TavilySearchResults
 
-# Pydantic
-from pydantic import BaseModel, Field
+# -------------------------------------------------------------------------
+# Azure OpenAI Configuration
+# -------------------------------------------------------------------------
+# We are using exactly the pattern from your example code:
+AZURE_OPENAI_API_KEY = st.secrets["AZURE_OPENAI_API_KEY"]
+AZURE_OPENAI_ENDPOINT = st.secrets["AZURE_OPENAI_ENDPOINT"]
+AZURE_OPENAI_API_VERSION = st.secrets["AZURE_OPENAI_API_VERSION"]
 
-# =============================================================================
-# Configuration - Azure OpenAI + Tavily
-# =============================================================================
-AZURE_OPENAI_API_KEY = st.secrets.get("AZURE_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY")
-AZURE_OPENAI_ENDPOINT = st.secrets.get("AZURE_OPENAI_ENDPOINT") or os.environ.get("OPENAI_API_ENDPOINT")
-AZURE_OPENAI_API_VERSION = st.secrets.get("AZURE_OPENAI_API_VERSION") or os.environ.get("AZURE_OPENAI_API_VERSION")
-TAVILY_API_KEY = st.secrets.get("TAVILY_API_KEY") or os.environ.get("TAVILY_API_KEY")
-
-# List of available models (map them to your actual Azure deployments or GPT names)
 AVAILABLE_MODELS = [
     "o1-mini",
     "gpt-4o",
     "gpt-4o-mini"
 ]
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 2. Data Structures for LATS (Node, Reflection, TreeState)
-# ─────────────────────────────────────────────────────────────────────────────
+client = AzureOpenAI(
+    api_key=AZURE_OPENAI_API_KEY,
+    azure_endpoint=AZURE_OPENAI_ENDPOINT,
+    api_version=AZURE_OPENAI_API_VERSION
+)
+
+# -------------------------------------------------------------------------
+# Tavily: optional for search
+# -------------------------------------------------------------------------
+tavily_api_key = st.secrets.get("TAVILY_API_KEY", "")
+search_api = TavilySearchAPIWrapper(api_key=tavily_api_key, max_results=5)
+tavily_tool = TavilySearchResults(api_wrapper=search_api, max_results=5)
+
+# -------------------------------------------------------------------------
+# LATS Data Structures (Reflection, Node, TreeState)
+# -------------------------------------------------------------------------
+from pydantic import BaseModel, Field
+
 class Reflection(BaseModel):
-    """Critique, reflections, and a numeric score for the candidate response."""
-    reflections: str = Field(
-        description="Critique, reflections on sufficiency, correctness, etc."
-    )
-    score: int = Field(
-        description="Score from 0-10 on the quality of the candidate response.",
-        gte=0,
-        lte=10,
-    )
-    found_solution: bool = Field(
-        description="Whether the response has fully solved the question or task."
-    )
+    reflections: str
+    score: int = Field(ge=0, le=10)
+    found_solution: bool
 
-    def as_message(self) -> BaseMessage:
-        """Convert reflection data to a human-style message for the next iteration."""
-        return HumanMessage(
-            content=f"Reflection:\n{self.reflections}\nScore: {self.score}"
-        )
-
-    @property
     def normalized_score(self) -> float:
         return self.score / 10.0
 
 
 class Node:
-    """Each Node in the LATS tree stores messages + reflection data, plus children."""
     def __init__(
         self,
-        messages: list[BaseMessage],
+        messages: list[dict],   # We'll store them as a list of dict for consistency with Azure usage
         reflection: Reflection,
         parent: Optional["Node"] = None,
     ):
@@ -94,439 +66,381 @@ class Node:
 
         self.value = 0.0
         self.visits = 0
-        self.depth = parent.depth + 1 if parent is not None else 1
-        self._is_solved = reflection.found_solution if reflection else False
+        self.depth = parent.depth + 1 if parent else 1
+        self._is_solved = reflection.found_solution
 
-        # If the node is solved, propagate 'solved' up the tree
         if self._is_solved:
             self._mark_tree_as_solved()
 
-        # Update the node's value upward
-        self.backpropagate(reflection.normalized_score)
+        # Update node & ancestors with reflection score
+        self.backpropagate(self.reflection.normalized_score())
 
     def __repr__(self):
-        return f"<Node value={self.value}, visits={self.visits}, reflection={self.reflection}/>"
-    
+        return f"<Node depth={self.depth}, value={self.value:.2f}, visits={self.visits}, solved={self._is_solved}/>" 
+
     @property
     def is_solved(self) -> bool:
         return self._is_solved
 
     @property
     def is_terminal(self) -> bool:
-        """No children => a leaf node in the tree."""
         return len(self.children) == 0
 
     @property
-    def best_child_score(self):
-        """Return the child with the highest value (preferring solved)."""
-        if not self.children:
-            return None
-        return max(self.children, key=lambda child: int(child.is_solved) * child.value)
-
-    @property
     def height(self) -> int:
-        """Max depth below this node (for measuring how 'deep' we rolled out)."""
+        """Max depth below this node."""
         if self.children:
-            return 1 + max([child.height for child in self.children])
+            return 1 + max(child.height for child in self.children)
         return 1
 
     def _mark_tree_as_solved(self):
-        """Propagate 'solved' status up the chain so we can stop early if desired."""
-        n = self
-        while n:
-            n._is_solved = True
-            n = n.parent
+        node = self
+        while node:
+            node._is_solved = True
+            node = node.parent
 
     def backpropagate(self, reward: float):
-        """Update the score of this node and all ancestors."""
         node = self
         while node:
             node.visits += 1
-            # Weighted average over visits
             node.value = (node.value * (node.visits - 1) + reward) / node.visits
             node = node.parent
 
-    def get_messages(self, include_reflections: bool = True):
-        if include_reflections:
-            return self.messages + [self.reflection.as_message()]
-        return self.messages
-
-    def get_trajectory(self, include_reflections: bool = True) -> list[BaseMessage]:
-        """Backtrack up the tree to build a message list describing the path."""
-        path = []
-        node = self
-        while node:
-            # Reverse to put reflection after the candidate messages
-            segment = node.get_messages(include_reflections=include_reflections)[::-1]
-            path.extend(segment)
-            node = node.parent
-        return path[::-1]
+    def upper_confidence_bound(self, exploration_weight=1.0):
+        if not self.parent:
+            return self.value
+        if self.visits == 0:
+            return self.value
+        avg_reward = self.value
+        explore = math.sqrt(math.log(self.parent.visits) / self.visits)
+        return avg_reward + exploration_weight * explore
 
     def get_best_solution(self) -> "Node":
-        """Return the best node that is a solution in this subtree."""
-        all_descendants = self._get_all_descendants()
-        # Include self
-        all_nodes = [self] + all_descendants
-        # We only rank nodes that are terminal and solved
-        best_node = max(
-            all_nodes,
-            key=lambda n: int(n.is_terminal and n.is_solved) * n.value,
+        """Return best solution node from this subtree if it exists."""
+        candidates = self._collect_descendants()
+        # Prefer terminal & solved nodes
+        best = max(
+            candidates,
+            key=lambda nd: int(nd.is_terminal and nd.is_solved) * nd.value,
         )
-        return best_node
+        return best
 
-    def _get_all_descendants(self) -> list["Node"]:
-        results = []
-        queue = deque([self])
-        while queue:
-            node = queue.popleft()
-            results.extend(node.children)
-            for child in node.children:
-                queue.append(child)
-        return results
+    def _collect_descendants(self) -> list["Node"]:
+        stack = [self]
+        out = []
+        while stack:
+            node = stack.pop()
+            out.append(node)
+            if node.children:
+                stack.extend(node.children)
+        return out
 
-# A simple typed dictionary for the search state
+def select_best_leaf(root: Node) -> Node:
+    """Starting from root, pick the highest UCT child until a leaf."""
+    node = root
+    while node.children:
+        node = max(node.children, key=lambda c: c.upper_confidence_bound())
+    return node
+
+# We'll store the root node + user input in a dict
 class TreeState(dict):
-    # "root": Node
-    # "input": str
     pass
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 3. Reflection + Generation + Expansion Runnables
-# ─────────────────────────────────────────────────────────────────────────────
+# -------------------------------------------------------------------------
+# Azure LLM Helpers
+# -------------------------------------------------------------------------
+def azure_chat(messages: list[dict], model_name: str, stream=False, n=1):
+    """
+    Minimal wrapper that calls the Azure Chat Completion API.
+    - messages: list of dicts e.g. [{"role": "user", "content": "Hello"}]
+    - model_name: typically "gpt-4o" or "o1-mini" in your case
+    - stream: whether to use streaming
+    - n: number of completions to generate
+    Returns a list of 'choices' in the standard openai format.
+    """
+    try:
+        resp = client.chat.completions.create(
+            model=model_name,
+            messages=messages,
+            stream=stream,
+            n=n
+        )
+        return resp
+    except OpenAIError as e:
+        st.error(f"OpenAI API Error: {str(e)}")
+        return None
 
-# 3A. Reflection Chain
-reflection_prompt = ChatPromptTemplate.from_messages(
-    [
-        ("system", "Reflect and grade the assistant response to the user question."),
-        ("user", "{input}"),
-        MessagesPlaceholder(variable_name="candidate"),
+def parse_tavily_tool_calls(assistant_msg: dict):
+    """
+    If the assistant message includes a function call to Távily, parse it out 
+    and return a list of tool calls: [{"name":..., "args":...}, ...]
+    For simplicity, we check assistant_msg["function_call"] if present.
+    Or parse the 'content' if it includes structured data.
+    """
+    # This is a placeholder; adapt logic for your actual usage.
+    tool_calls = []
+    if "function_call" in assistant_msg:
+        fc = assistant_msg["function_call"]
+        if fc.get("name") == "tavily_search_results_json":
+            tool_calls.append({"name": "tavily_search_results_json", "args": fc.get("arguments", {})})
+    return tool_calls
+
+def run_tavily_tools(tool_calls: list[dict]):
+    """Calls TávilySearchResults for each tool call. Returns list of new messages."""
+    out_msgs = []
+    for tc in tool_calls:
+        # Using the TávilySearchResults tool
+        results = tavily_tool._run(tc["args"]["query"])
+        # We'll store the result in a new message with role=tool for convenience
+        out_msgs.append(
+            {
+                "role": "tool",
+                "content": results
+            }
+        )
+    return out_msgs
+
+
+# -------------------------------------------------------------------------
+# Reflection Step: Score or critique a candidate
+# -------------------------------------------------------------------------
+def reflection_step(user_input: str, candidate_msgs: list[dict], model_name: str) -> Reflection:
+    """
+    Calls Azure to reflect on the candidate. Return a Reflection object.
+    In your approach, you can define any reflection prompt you like.
+    """
+    # We'll define a simple reflection system prompt
+    reflection_prompt = [
+        {
+            "role": "system",
+            "content": "Reflect and grade the assistant's response. Provide a score (0-10) and whether it solved the query."
+        },
+        {
+            "role": "user",
+            "content": f"User asked: {user_input}\nAssistant response:\n{candidate_msgs[-1].get('content', '')}"
+        }
     ]
-)
 
-# We'll parse the reflection as a "Reflection" Pydantic model
-from langchain_core.runnables import chain as chain_runnable
-from langchain_core.output_parsers.openai_tools import PydanticToolsParser
+    resp = azure_chat(reflection_prompt, model_name=model_name)
+    if not resp or not resp.choices:
+        return Reflection(reflections="No reflection", score=0, found_solution=False)
 
-reflection_llm = ChatOpenAI(
-    azure_deployment=model_choice,
-    openai_api_key=AZURE_OPENAI_API_KEY,
-    azure_endpoint=AZURE_OPENAI_ENDPOINT,
-    openai_api_version=AZURE_OPENAI_API_VERSION,
-        temperature=0.1
+    # We'll do a naive parse: look for "Score: x" (0-10) and "Solution: True/False"
+    text = resp.choices[0].message.content or ""
+    # Extract score
+    score_match = re.search(r"score\s*[:=]\s*(\d+)", text.lower())
+    found_solution = False
+    sol_match = re.search(r"(?i)(found_solution|solution|complete)\s*[:=]\s*(true|false)", text)
+    if sol_match:
+        found_solution = sol_match.group(2).lower() == "true"
+
+    score_val = 0
+    if score_match:
+        try:
+            s = int(score_match.group(1))
+            score_val = max(0, min(10, s))
+        except ValueError:
+            pass
+
+    reflection = Reflection(
+        reflections=text.strip(),
+        score=score_val,
+        found_solution=found_solution
     )
-
-reflection_parser = PydanticToolsParser(tools=[Reflection])
-
-reflection_chain = (
-    reflection_prompt
-    | reflection_llm.bind_tools(tools=[Reflection], tool_choice="Reflection").with_config(run_name="Reflection")
-    | reflection_parser
-)
-
-@chain_runnable
-def reflection_fn(inputs) -> Reflection:
-    tool_choices = reflection_chain.invoke(inputs)
-    reflection = tool_choices[0]
-    # If the final message is not from the AI, it's not a solution
-    candidate = inputs["candidate"]
-    if len(candidate) == 0 or not isinstance(candidate[-1], AIMessage):
-        reflection.found_solution = False
     return reflection
 
-# 3B. Tools: Tavily Search
-search = TavilySearchAPIWrapper(api_key=TAVILY_API_KEY, max_results=5)
-tavily_tool = TavilySearchResults(api_wrapper=search, max_results=5)
-tool_node = ToolNode(tools=[tavily_tool])
 
-# 3C. Prompt to get "initial" or "expanded" answers
-#     We'll keep the structure from the notebook example: user + existing messages
-init_prompt = ChatPromptTemplate.from_messages(
-    [
-        ("system", "You are an AI assistant. Additional system prompt: {system_prompt}"),
-        ("user", "{user_input}"),
-        MessagesPlaceholder(variable_name="messages", optional=True),
-    ]
-)
-
-gen_parser = JsonOutputToolsParser(return_id=True)
-
-# We'll define a function that calls the chat model to produce N expansions
-@chain_runnable
-def generate_candidates(inputs, config: RunnableConfig):
-    """Generate N candidate next steps from the current node's messages."""
-    N = config["configurable"].get("N", 5)  # default 5 expansions
-    llm = ChatOpenAI(
-        model_name="gpt-4o",
-        temperature=0.9,
-        max_tokens=1000,
-        n=N,
-    ).bind_tools(tools=[tavily_tool])
-
-    prompt_val = ChatPromptValue(
-        messages=init_prompt.format_prompt(
-            system_prompt=inputs["system_prompt"],
-            user_input=inputs["user_input"],
-            messages=inputs["messages"],
-        ).to_messages()
-    )
-    chat_result = llm.generate([prompt_val.to_messages()])
-    # Return multiple candidate AIMessage objects
-    return [gen.message for gen in chat_result.generations[0]]
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 4. Graph Steps: "start" (generate root) and "expand"
-# ─────────────────────────────────────────────────────────────────────────────
-
-def select_best_leaf(root: Node) -> Node:
-    """Select the leaf node with highest UCT from root to leaf."""
-    # If no children, return root
-    if not root.children:
-        return root
-
-    node = root
-    while node.children:
-        node = max(node.children, key=lambda child: child.upper_confidence_bound())
-    return node
-
+# -------------------------------------------------------------------------
+# Step: Generate the initial candidate (root node)
+# -------------------------------------------------------------------------
 def generate_initial_response(state: TreeState) -> TreeState:
-    """
-    Generate the initial candidate from the user input (root node).
-    """
     user_input = state["input"]
-    system_prompt = state.get("system_prompt", "")
+    model_name = state["model_name"]
 
-    # Step 1: Produce initial answer
-    # Single generation
-    llm = ChatOpenAI(
-        model_name="gpt-4o",
-        temperature=0.9,
-        max_tokens=1200,
-    ).bind_tools(tools=[tavily_tool])
-    prompt_val = init_prompt.format_prompt(
-        system_prompt=system_prompt,
-        user_input=user_input,
-        messages=[],
-    )
-    result_msg = llm.invoke(prompt_val.to_messages())
-    parsed = gen_parser.invoke(result_msg)
-
-    # Step 2: Possibly call the Tavily tool
-    tool_resps = []
-    if parsed:
-        for tcall in parsed:
-            tool_resp = tool_node.invoke(
-                {
-                    "messages": [
-                        AIMessage(
-                            content="",
-                            tool_calls=[
-                                {
-                                    "name": tcall["type"],
-                                    "args": tcall["args"],
-                                    "id": tcall["id"],
-                                }
-                            ],
-                        )
-                    ]
-                }
-            )
-            tool_resps.append(tool_resp["messages"][0])
-
-    # Combine
-    output_messages = [result_msg] + tool_resps
-
-    # Step 3: Reflect
-    reflection = reflection_fn.invoke(
+    # system message for context
+    messages = [
         {
-            "input": user_input,
-            "candidate": output_messages,
+            "role": "system",
+            "content": "You are an AI assistant capable of step-by-step reasoning. Provide a helpful response."
         }
-    )
+    ]
+    # user message
+    messages.append({"role": "user", "content": user_input})
 
-    root_node = Node(output_messages, reflection=reflection, parent=None)
+    # 1. Call Azure Chat for initial candidate
+    resp = azure_chat(messages, model_name=model_name, stream=False, n=1)
+    if not resp or not resp.choices:
+        # Fallback
+        reflection = Reflection(reflections="No initial answer", score=0, found_solution=False)
+        state["root"] = Node(messages=[], reflection=reflection, parent=None)
+        return state
+
+    ai_msg = resp.choices[0].message.to_dict()  # Convert to a dict: {role=..., content=..., function_call=...}
+
+    # 2. Parse tool usage if any
+    tool_calls = parse_tavily_tool_calls(ai_msg)
+    tool_msgs = run_tavily_tools(tool_calls)
+
+    final_msgs = messages + [ai_msg] + tool_msgs
+
+    # 3. Reflection
+    reflection = reflection_step(user_input, final_msgs, model_name)
+
+    root_node = Node(final_msgs, reflection=reflection, parent=None)
     state["root"] = root_node
     return state
 
-def expand(state: TreeState, config: RunnableConfig) -> TreeState:
+
+# -------------------------------------------------------------------------
+# Step: Expand. Generate N new candidates from the best leaf.
+# -------------------------------------------------------------------------
+def generate_candidates(user_input: str, prefix_msgs: list[dict], model_name: str, N=5):
     """
-    From the best leaf, generate N candidate expansions. Score them, attach them.
+    Calls Azure to produce N candidate expansions. Return a list of message dicts.
     """
+    # We'll just do the same system+user format, but add prefix_msgs as assistant context
+    # so the model can continue from that state.
+    # Some might prefer a separate "role=system" specifying "Propose next steps" etc.
+    system_prompt = {
+        "role": "system",
+        "content": "Continue reasoning from the conversation so far. Provide the next response."
+    }
+    # We'll treat prefix_msgs as conversation context.
+    conv = [system_prompt] + prefix_msgs
+    resp = azure_chat(conv, model_name=model_name, stream=False, n=N)
+    if not resp or not resp.choices:
+        return []
+
+    return [choice.message.to_dict() for choice in resp.choices]
+
+
+def expand(state: TreeState) -> TreeState:
     root = state["root"]
-    best_leaf = select_best_leaf(root)
-    # Build the message trajectory
-    messages = best_leaf.get_trajectory()
     user_input = state["input"]
-    system_prompt = state.get("system_prompt", "")
+    model_name = state["model_name"]
 
-    # Generate expansions (N candidates)
-    expansions = generate_candidates.invoke(
-        {
-            "system_prompt": system_prompt,
-            "user_input": user_input,
-            "messages": messages,
-        },
-        config,
-    )
+    # 1) select best leaf
+    leaf = select_best_leaf(root)
+    trajectory = leaf.messages  # all messages up to now
 
-    # For each candidate, parse tool calls + reflect
+    # 2) generate N expansions
+    expansions = generate_candidates(user_input, trajectory, model_name, N=5)
     child_nodes = []
-    for candidate_msg in expansions:
-        tool_calls = gen_parser.invoke(candidate_msg)
-        tool_output_msgs = []
-        if tool_calls:
-            for tcall in tool_calls:
-                tool_res = tool_node.invoke(
-                    {
-                        "messages": [
-                            AIMessage(
-                                content="",
-                                tool_calls=[
-                                    {
-                                        "name": tcall["type"],
-                                        "args": tcall["args"],
-                                        "id": tcall["id"],
-                                    }
-                                ],
-                            )
-                        ]
-                    }
-                )
-                tool_output_msgs.append(tool_res["messages"][0])
+    for e_msg in expansions:
+        # parse tool calls
+        tool_calls = parse_tavily_tool_calls(e_msg)
+        tool_msgs = run_tavily_tools(tool_calls)
 
-        # Combine
-        candidate_msgs = [candidate_msg] + tool_output_msgs
-        reflection = reflection_fn.invoke(
-            {"input": user_input, "candidate": candidate_msgs}
-        )
-        node = Node(candidate_msgs, reflection=reflection, parent=best_leaf)
-        best_leaf.children.append(node)
+        cand_msgs = trajectory + [e_msg] + tool_msgs
+        reflect = reflection_step(user_input, cand_msgs, model_name)
+        node = Node(cand_msgs, reflection=reflect, parent=leaf)
+        leaf.children.append(node)
         child_nodes.append(node)
 
     return state
 
 
-def should_loop(state: TreeState) -> Literal["expand", END]:
-    """Return 'expand' or END depending on whether we found a solution or reached depth."""
+# -------------------------------------------------------------------------
+# Step: Should we keep searching or stop?
+# -------------------------------------------------------------------------
+def should_loop(state: TreeState) -> Literal["expand", "END"]:
     root = state["root"]
-    if root.is_solved:
-        return END
-    # If we've rolled out to depth > 5, stop
-    if root.height >= 5:
-        return END
+    # If solved or depth>5, end
+    if root.is_solved or root.height >= 5:
+        return "END"
     return "expand"
 
-# Build the LATS graph
-from langgraph.graph import StateGraph
 
-builder = StateGraph(TreeState)
-builder.add_node("start", generate_initial_response)
-builder.add_node("expand", expand)
+# -------------------------------------------------------------------------
+# Build a minimal LATS-like state graph
+# -------------------------------------------------------------------------
+def run_lats(state: TreeState):
+    """
+    Minimal driver function:
+    - start => generate_initial_response => check loop => expand => check loop => expand => ...
+    - stops when solved or depth limit reached
+    """
+    # start
+    state = generate_initial_response(state)
+    step_count = 0
+    while True:
+        choice = should_loop(state)
+        if choice == "END":
+            break
+        # else expand
+        state = expand(state)
+        step_count += 1
+        if step_count > 10:
+            # safety
+            break
+    return state
 
-builder.add_edge(START, "start")
-builder.add_conditional_edges(
-    "start",
-    should_loop,
-    ["expand", END],
-)
-builder.add_conditional_edges(
-    "expand",
-    should_loop,
-    ["expand", END],
-)
 
-lats_graph = builder.compile()
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 5. Streamlit App
-# ─────────────────────────────────────────────────────────────────────────────
-
+# -------------------------------------------------------------------------
+# Streamlit Integration
+# -------------------------------------------------------------------------
 def main():
-    st.set_page_config(page_title="Agents - LATS", page_icon="🤖")
-    st.title("LATS Agents with LangGraph")
+    st.set_page_config(page_title="Azure OpenAI LATS", page_icon="🧠")
+    st.title("LATS with Azure OpenAI (no standard OPENAI_API_KEY needed)")
 
-    # Initialize session for chat history
+    # Chat-like conversation
     if "messages" not in st.session_state:
         st.session_state["messages"] = [
-            {"role": "assistant", "content": "Hello! How can I help you today?"}
+            {"role": "assistant", "content": "Hello! I'm an Azure-based AI. How can I help?"}
         ]
 
-    # Sidebar config
     with st.sidebar:
         st.header("Configuration")
-        model_choice = st.selectbox("Select Model:", AVAILABLE_MODELS, index=0)
-        default_system_prompt = "You are an AI assistant."
-        system_prompt = st.text_area("System Prompt", default_system_prompt)
-        streaming_enabled = st.checkbox("Enable Streaming", value=False)
-        verbosity_enabled = st.checkbox("Enable Verbose Mode", value=False)
-        st.write("---")
-        st.write("Tavily API Key:", TAVILY_API_KEY if TAVILY_API_KEY else "Not Set")
-        st.write("OpenAI API Key:", AZURE_OPENAI_API_KEY if AZURE_OPENAI_API_KEY else "Not Set")
+        model_choice = st.selectbox("Azure Model Deployment:", AVAILABLE_MODELS, index=0)
+        streaming = st.checkbox("Enable Streaming", value=False)
+        st.markdown("---")
+        if st.button("Clear Conversation"):
+            st.session_state["messages"] = [
+                {"role": "assistant", "content": "Conversation cleared. How can I help you now?"}
+            ]
 
     # Display conversation
     for msg in st.session_state["messages"]:
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
 
-    # Chat input
-    if user_input := st.chat_input("Ask a question..."):
-        st.session_state["messages"].append({"role": "user", "content": user_input})
+    if prompt := st.chat_input("Ask a question..."):
+        # Add user message
+        st.session_state["messages"].append({"role": "user", "content": prompt})
         with st.chat_message("user"):
-            st.write(user_input)
+            st.write(prompt)
 
+        # Container for the final LATS result
         with st.chat_message("assistant"):
-            message_placeholder = st.empty()
+            response_placeholder = st.empty()
+            # Build a LATS state
+            state = TreeState(input=prompt, model_name=model_choice)
 
-            # We run the LATS Graph using the user's question as 'input'
-            # We'll store the final answer in 'response_text'
-            response_text = ""
-            try:
-                # Prepare the LATS state
-                initial_state: TreeState = {
-                    "input": user_input,
-                    "system_prompt": system_prompt,
-                }
-
-                # We'll step through the graph. For short queries, it might not expand much.
-                last_output = None
-                for step in lats_graph.stream(initial_state):
-                    # step is a dict, like {"start": <TreeState>} or {"expand": <TreeState>}
-                    last_output = step
-
-                    if verbosity_enabled:
-                        # Show the intermediate step name + partial state
-                        step_name, step_data = next(iter(step.items()))
-                        message_placeholder.markdown(
-                            f"**Step**: {step_name}, **Tree Depth**: {step_data['root'].height}"
-                        )
-                # done
-                if last_output:
-                    # final state's root
-                    step_name, final_state = next(iter(last_output.items()))
-                    solution_node = final_state["root"].get_best_solution()
-                    # The last AIMessage is presumably the final "solution"
-                    # We'll not show reflection messages here, just the final text
-                    final_trajectory = solution_node.get_trajectory(include_reflections=False)
-                    # The last message in that trajectory from the AI
-                    # (some steps might have multiple AI messages, but typically the last is the final "answer")
-                    for msg in reversed(final_trajectory):
-                        if isinstance(msg, AIMessage):
-                            response_text = msg.content
+            with st.spinner("Thinking with LATS..."):
+                try:
+                    final_state = run_lats(state)
+                    # best solution
+                    best_solution = final_state["root"].get_best_solution()
+                    # The last AI message in that trajectory
+                    final_msg = ""
+                    for msg in reversed(best_solution.messages):
+                        if msg["role"] == "assistant":
+                            final_msg = msg["content"]
                             break
-                message_placeholder.write(response_text or "No solution found.")
-            except Exception as exc:
-                st.error(f"Error: {exc}")
-                response_text = (
-                    "I encountered an error processing your request. Please try again."
-                )
 
-        st.session_state["messages"].append({"role": "assistant", "content": response_text})
+                    # Cleanup whitespace
+                    final_msg = re.sub(r'[ \t]+$', '', final_msg, flags=re.MULTILINE)
+                    final_msg = re.sub(r'^\s*\n', '', final_msg)
+                    final_msg = re.sub(r'\n\s*$', '', final_msg)
+
+                    response_placeholder.write(final_msg)
+                    st.session_state["messages"].append({"role": "assistant", "content": final_msg})
+                except Exception as e:
+                    st.error(f"Error during LATS: {e}")
+                    st.session_state["messages"].append(
+                        {"role": "assistant", "content": "Oops, something went wrong with LATS."}
+                    )
 
 if __name__ == "__main__":
-    # If not provided via secrets, you can do something like this:
-    # if not os.environ.get("TAVILY_API_KEY"):
-    #     os.environ["TAVILY_API_KEY"] = getpass("TAVILY_API_KEY")
-    # if not os.environ.get("OPENAI_API_KEY"):
-    #     os.environ["OPENAI_API_KEY"] = getpass("OPENAI_API_KEY")
     main()
