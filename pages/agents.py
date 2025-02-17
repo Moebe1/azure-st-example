@@ -66,7 +66,6 @@ Step-by-Step Reasoning:
 5) Conclude with a concise and accurate answer.
 
 Final Answer:
-Remember to respond only with your final answer, not the chain-of-thought steps.
 """
 
         CUSTOM_SUFFIX = "Begin!"
