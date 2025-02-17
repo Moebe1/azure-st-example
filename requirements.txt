@@ -11,3 +11,5 @@ langsmith
 langgraph
 langchain_core
 tavily-python
+numexpr
+beautifulsoup4

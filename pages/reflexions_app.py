@@ -3,6 +3,10 @@ from openai import AzureOpenAI, OpenAIError
 import re
 from pydantic import BaseModel, Field
 import logging
+import numexpr
+from bs4 import BeautifulSoup
+import requests
+from langchain_community.tools.tavily_search import TavilySearchResults
 
 # =============================================================================
 # Suppress Streamlit Debug Messages
@@ -15,6 +19,7 @@ logging.getLogger("streamlit").setLevel(logging.ERROR)
 AZURE_OPENAI_API_KEY = st.secrets["AZURE_OPENAI_API_KEY"]
 AZURE_OPENAI_ENDPOINT = st.secrets["AZURE_OPENAI_ENDPOINT"]
 AZURE_OPENAI_API_VERSION = st.secrets["AZURE_OPENAI_API_VERSION"]
+TAVILY_API_KEY = st.secrets["TAVILY_API_KEY"]
 
 # List of deployments you have in Azure OpenAI
 AVAILABLE_MODELS = [
@@ -44,6 +49,47 @@ class AnswerQuestion(BaseModel):
     revised_answer: str = Field(description="Revised answer based on the reflection.")
 
 # =============================================================================
+# Tool Definitions
+# =============================================================================
+def calculate(expression: str) -> str:
+    """
+    Evaluates a mathematical expression and returns the result.
+    """
+    try:
+        result = numexpr.evaluate(expression)
+        return str(result)
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+def summarize_document(url: str) -> str:
+    """
+    Summarizes the content of a document at a given URL.
+    """
+    try:
+        response = requests.get(url)
+        response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
+        soup = BeautifulSoup(response.content, "html.parser")
+        text = ' '.join(soup.stripped_strings)
+
+        # Summarize the text using OpenAI
+        messages = [{"role": "user", "content": f"Summarize the following text:\n{text}"}]
+        summary_response = client.chat.completions.create(
+            model="gpt-4o",  # Or another suitable model
+            messages=messages,
+            stream=False
+        )
+        if summary_response and summary_response.choices and summary_response.choices[0].message:
+            return summary_response.choices[0].message.content or ""
+        else:
+            return "Could not summarize the document."
+    except requests.exceptions.RequestException as e:
+        return f"Error fetching URL: {str(e)}"
+    except Exception as e:
+        return f"Error summarizing document: {str(e)}"
+
+tavily_search = TavilySearchResults(api_key=TAVILY_API_KEY)
+
+# =============================================================================
 # Reflexion Actor Logic
 # =============================================================================
 def get_openai_response(messages, model_name):
@@ -51,19 +97,97 @@ def get_openai_response(messages, model_name):
         response = client.chat.completions.create(
             model=model_name,
             messages=messages,
-            stream=False
+            stream=False,
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "calculate",
+                        "description": "Evaluates a mathematical expression and returns the result.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "expression": {
+                                    "type": "string",
+                                    "description": "The mathematical expression to evaluate."
+                                }
+                            },
+                            "required": ["expression"]
+                        }
+                    }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "summarize_document",
+                        "description": "Summarizes the content of a document at a given URL.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "url": {
+                                    "type": "string",
+                                    "description": "The URL of the document to summarize."
+                                }
+                            },
+                            "required": ["url"]
+                        }
+                    }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "tavily_search_results_json",
+                        "description": "Useful for when you need to answer questions about current events. Input should be a search query.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "query": {
+                                    "type": "string",
+                                    "description": "The search query to use."
+                                }
+                            },
+                            "required": ["query"]
+                        }
+                    }
+                }
+            ],
+            tool_choice="auto"
         )
         return response
     except OpenAIError as e:
         st.error(f"OpenAI API Error: {str(e)}")
         return None
 
+def process_response(response):
+    assistant_text = ""
+    if response and response.choices and response.choices[0].message:
+        message = response.choices[0].message
+        assistant_text = message.content or ""
+
+        # Check for tool calls
+        if message.tool_calls:
+            for tool_call in message.tool_calls:
+                function_name = tool_call.function.name
+                function_args = tool_call.function.arguments
+
+                if function_name == "calculate":
+                    expression = eval(function_args)['expression']
+                    assistant_text += f"\n\nCalculating: {expression} = {calculate(expression)}"
+                elif function_name == "summarize_document":
+                    url = eval(function_args)['url']
+                    assistant_text += f"\n\nSummarizing document at {url}: {summarize_document(url)}"
+                elif function_name == "tavily_search_results_json":
+                    query = eval(function_args)['query']
+                    search_results = tavily_search.run(query)
+                    assistant_text += f"\n\nTavily Search Results: {search_results}"
+    return assistant_text
+
 # =============================================================================
 # Main Streamlit App
 # =============================================================================
 def main():
-    st.set_page_config(page_title="Reflexions LangGraph Agent", page_icon="🤖")
-    st.title("Reflexions LangGraph Agent")
+    st.set_page_config(page_title="Reflexions Multi-Tool Agent", page_icon="🤖")
+    st.title("Reflexions Multi-Tool Agent")
 
     if "messages" not in st.session_state:
         st.session_state["messages"] = [
@@ -94,30 +218,22 @@ def main():
 
             # Initial response
             with st.spinner("Thinking..."):
-                initial_prompt = f"""You are a helpful AI assistant. Answer the following question in about 250 words: {prompt}
+                initial_prompt = f"""You are a helpful AI assistant. You have access to the following tools:
+                - calculate: Evaluates a mathematical expression and returns the result.
+                - summarize_document: Summarizes the content of a document at a given URL.
+                - tavily_search_results_json: Searches the web and returns results.
+
+                Solve the following problem: {prompt}
                 After providing the answer, reflect on what is missing or superfluous in your response.
                 """
                 messages = [{"role": "user", "content": initial_prompt}]
                 response = get_openai_response(messages, model_choice)
+                assistant_text = process_response(response)
 
-                if response and response.choices and response.choices[0].message:
-                    assistant_text = response.choices[0].message.content or ""
-                    st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
-                    message_placeholder.write(assistant_text)
+                st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
+                message_placeholder.write(assistant_text)
 
-            # Reflection and revision
-            with st.spinner("Reflecting and revising..."):
-                reflection_prompt = f"""You are a helpful AI assistant. You previously answered the question: {prompt} with the following answer: {assistant_text}.
-                Now, reflect on your answer. What is missing? What is superfluous? Provide a critique of your answer.
-                Then, based on your reflection, revise your answer to improve it.
-                """
-                messages = [{"role": "user", "content": reflection_prompt}]
-                response = get_openai_response(messages, model_choice)
-
-                if response and response.choices and response.choices[0].message:
-                    revised_assistant_text = response.choices[0].message.content or ""
-                    st.session_state["messages"].append({"role": "assistant", "content": revised_assistant_text})
-                    message_placeholder.write(f"**Revised Answer:**\n{revised_assistant_text}")
+            # Reflection and revision (removed for simplicity)
 
 if __name__ == "__main__":
     main()
