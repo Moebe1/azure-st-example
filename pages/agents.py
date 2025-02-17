@@ -35,10 +35,10 @@ client = AzureOpenAI(
 # Tavily: optional for search
 # -------------------------------------------------------------------------
 tavily_api_key = st.secrets.get("TAVILY_API_KEY", "")
-os.environ["TAVILY_API_KEY"] = tavily_api_key  # TávilySearchAPIWrapper picks it from the environment
+os.environ["TAVILY_API_KEY"] = tavily_api_key  # TávilySearchAPIWrapper picks it from environment
 search_api = TavilySearchAPIWrapper()
 tavily_tool = TavilySearchResults(api_wrapper=search_api)
-tavily_tool.max_results = 5  # If allowed in the latest version
+tavily_tool.max_results = 5  # If allowed in your Tavily version
 
 # -------------------------------------------------------------------------
 # LATS Data Structures (Reflection, Node, TreeState)
@@ -77,7 +77,7 @@ class Node:
         self.backpropagate(reflection.normalized_score())
 
     def __repr__(self):
-        return f"<Node depth={self.depth}, value={self.value:.2f}, visits={self.visits}, solved={self._is_solved}/>" 
+        return f"<Node depth={self.depth}, value={self.value:.2f}, visits={self.visits}, solved={self._is_solved}/>"
 
     @property
     def is_solved(self) -> bool:
@@ -119,6 +119,7 @@ class Node:
     def get_best_solution(self) -> "Node":
         """Return best solution node from this subtree if it exists."""
         candidates = self._collect_descendants()
+        # Maximize value if node is terminal & solved
         best = max(
             candidates,
             key=lambda nd: int(nd.is_terminal and nd.is_solved) * nd.value,
@@ -138,32 +139,33 @@ class Node:
 
 class TreeState(dict):
     """
-    E.g. {
+    e.g. {
       "input": "user question",
       "model_name": "gpt-4o",
-      "verbose": True or False
+      "verbose": True/False,
+      "max_tokens": 500,   # or some limit
       "root": <Node>
     }
     """
 
 
 # -------------------------------------------------------------------------
-# Azure Chat + usage logging
+# Azure Chat + usage logging + max token param
 # -------------------------------------------------------------------------
 def azure_chat(
     messages: list[dict],
     model_name: str,
     stream=False,
     n=1,
-    verbose=False
+    verbose=False,
+    max_tokens=500
 ):
     """
     Minimal wrapper that calls the Azure Chat Completion API and logs usage.
-    If verbose=True, prints logs to Streamlit. Also increments token usage in 
-    st.session_state["total_tokens_used"] if usage info is returned.
+    We also cap the generation with 'max_tokens'. 
     """
     if verbose:
-        st.write(f"**Azure Chat Request** => model={model_name}, n={n}, stream={stream}")
+        st.write(f"**Azure Chat Request** => model={model_name}, n={n}, stream={stream}, max_tokens={max_tokens}")
         st.write("Messages:")
         for idx, msg in enumerate(messages):
             st.write(f"{idx}. {msg['role'].upper()}: {msg.get('content', '')}")
@@ -173,12 +175,11 @@ def azure_chat(
             model=model_name,
             messages=messages,
             stream=stream,
-            n=n
+            n=n,
+            max_tokens=max_tokens
         )
-        # Log usage if present
         usage = getattr(resp, "usage", None)
         if usage:
-            # Add to session total
             prompt_toks = getattr(usage, "prompt_tokens", 0) or 0
             completion_toks = getattr(usage, "completion_tokens", 0) or 0
             total_toks = getattr(usage, "total_tokens", 0) or (prompt_toks + completion_toks)
@@ -195,19 +196,16 @@ def azure_chat(
 
 
 def parse_tavily_tool_calls(assistant_msg: dict):
-    # If the model uses function_call for Távily:
     tool_calls = []
     if "function_call" in assistant_msg:
         fc = assistant_msg["function_call"]
         if fc.get("name") == "tavily_search_results_json":
             args = fc.get("arguments", {})
-            # Possibly parse 'args' from a string if needed
             tool_calls.append({
                 "name": "tavily_search_results_json",
                 "args": args
             })
     return tool_calls
-
 
 def run_tavily_tools(tool_calls: list[dict], verbose=False):
     out_msgs = []
@@ -215,6 +213,7 @@ def run_tavily_tools(tool_calls: list[dict], verbose=False):
         if verbose:
             st.write(f"**Calling Tavily** with query: {tc['args']}")
         query = tc["args"].get("query", "")
+        # The model must specifically call "tavily_search_results_json" to invoke Távily
         results = tavily_tool._run(query)
         out_msgs.append({"role": "tool", "content": results})
     return out_msgs
@@ -223,11 +222,11 @@ def run_tavily_tools(tool_calls: list[dict], verbose=False):
 # -------------------------------------------------------------------------
 # Reflection Step: score candidate
 # -------------------------------------------------------------------------
-def reflection_step(user_input: str, candidate_msgs: list[dict], model_name: str, verbose=False) -> Reflection:
-    """
-    Calls Azure to reflect on the candidate. 
-    We'll attempt to parse 'Score: x' & 'Solution: True/False' from the response.
-    """
+def reflection_step(user_input: str, candidate_msgs: list[dict], state: TreeState) -> Reflection:
+    model_name = state["model_name"]
+    verbose = state.get("verbose", False)
+    max_tokens = state.get("max_tokens", 500)
+
     reflection_prompt = [
         {
             "role": "system",
@@ -235,16 +234,24 @@ def reflection_step(user_input: str, candidate_msgs: list[dict], model_name: str
         },
         {
             "role": "user",
-            "content": f"User asked: {user_input}\nAssistant response:\n{candidate_msgs[-1].get('content', '')}"
+            "content": (
+                f"User asked: {user_input}\n"
+                f"Assistant response:\n{candidate_msgs[-1].get('content', '')}"
+            )
         }
     ]
-
-    resp = azure_chat(reflection_prompt, model_name=model_name, stream=False, n=1, verbose=verbose)
+    resp = azure_chat(
+        reflection_prompt,
+        model_name=model_name,
+        stream=False,
+        n=1,
+        verbose=verbose,
+        max_tokens=max_tokens
+    )
     if not resp or not resp.choices:
         return Reflection(reflections="No reflection", score=0, found_solution=False)
 
     text = resp.choices[0].message.content or ""
-    # Attempt to find "Score: x"
     score_match = re.search(r"score\s*[:=]\s*(\d+)", text.lower())
     found_solution = False
     sol_match = re.search(r"(?i)(found_solution|solution|complete)\s*[:=]\s*(true|false)", text)
@@ -259,14 +266,18 @@ def reflection_step(user_input: str, candidate_msgs: list[dict], model_name: str
         except ValueError:
             pass
 
-    reflection = Reflection(
+    # If reflection score >= 8, consider it "solved"
+    if score_val >= 8:
+        found_solution = True
+
+    if verbose:
+        st.write(f"**Reflection** => Score={score_val}, FoundSolution={found_solution}")
+
+    return Reflection(
         reflections=text.strip(),
         score=score_val,
         found_solution=found_solution
     )
-    if verbose:
-        st.write(f"**Reflection** => Score={score_val}, FoundSolution={found_solution}")
-    return reflection
 
 
 # -------------------------------------------------------------------------
@@ -286,59 +297,65 @@ def generate_initial_response(state: TreeState) -> TreeState:
     user_input = state["input"]
     model_name = state["model_name"]
     verbose = state.get("verbose", False)
+    max_tokens = state.get("max_tokens", 500)
 
-    # system & user messages
+    if verbose:
+        st.write("**[generate_initial_response]**: Creating root node.")
+
     messages = [
         {"role": "system", "content": "You are an AI assistant with chain-of-thought."},
         {"role": "user", "content": user_input},
     ]
 
-    if verbose:
-        st.write("**[generate_initial_response]**: Creating root node.")
-
-    resp = azure_chat(messages, model_name=model_name, stream=False, n=1, verbose=verbose)
+    resp = azure_chat(messages, model_name=model_name, stream=False, n=1, verbose=verbose, max_tokens=max_tokens)
     if not resp or not resp.choices:
         reflection = Reflection(reflections="No initial answer", score=0, found_solution=False)
         state["root"] = Node([], reflection)
         return state
 
     ai_msg = resp.choices[0].message.to_dict()
-    # parse tool usage
     tool_calls = parse_tavily_tool_calls(ai_msg)
     tool_msgs = run_tavily_tools(tool_calls, verbose=verbose)
     final_msgs = messages + [ai_msg] + tool_msgs
 
-    reflection = reflection_step(user_input, final_msgs, model_name, verbose=verbose)
+    reflection = reflection_step(user_input, final_msgs, state)
     root = Node(final_msgs, reflection)
     state["root"] = root
     return state
 
-def generate_candidates(user_input: str, prefix_msgs: list[dict], model_name: str, N=5, verbose=False):
-    """Generate N expansions from the leaf node's trajectory."""
+def generate_candidates(leaf_msgs: list[dict], state: TreeState, N=5):
+    user_input = state["input"]
+    model_name = state["model_name"]
+    verbose = state.get("verbose", False)
+    max_tokens = state.get("max_tokens", 500)
+
     if verbose:
         st.write(f"**generate_candidates** => N={N}")
 
     system_prompt = {"role": "system", "content": "Please continue the conversation step by step."}
-    conversation = [system_prompt] + prefix_msgs
+    conversation = [system_prompt] + leaf_msgs
 
-    resp = azure_chat(conversation, model_name=model_name, stream=False, n=N, verbose=verbose)
+    resp = azure_chat(
+        conversation,
+        model_name=model_name,
+        stream=False,
+        n=N,
+        verbose=verbose,
+        max_tokens=max_tokens
+    )
     if not resp or not resp.choices:
         return []
     return [c.message.to_dict() for c in resp.choices]
 
 def expand(state: TreeState) -> TreeState:
     root = state["root"]
-    user_input = state["input"]
-    model_name = state["model_name"]
+    leaf = select_best_leaf(root)
     verbose = state.get("verbose", False)
 
-    leaf = select_best_leaf(root)
     if verbose:
         st.write(f"**[expand]** => Best leaf so far: {leaf}")
 
-    expansions = generate_candidates(
-        user_input, leaf.messages, model_name, N=5, verbose=verbose
-    )
+    expansions = generate_candidates(leaf.messages, state, N=5)
     if verbose:
         st.write(f"Generated {len(expansions)} expansions.")
 
@@ -346,7 +363,7 @@ def expand(state: TreeState) -> TreeState:
         tool_calls = parse_tavily_tool_calls(e_msg)
         tool_msgs = run_tavily_tools(tool_calls, verbose=verbose)
         cand_msgs = leaf.messages + [e_msg] + tool_msgs
-        reflection = reflection_step(user_input, cand_msgs, model_name, verbose=verbose)
+        reflection = reflection_step(state["input"], cand_msgs, state)
         node = Node(cand_msgs, reflection, parent=leaf)
         leaf.children.append(node)
 
@@ -358,7 +375,6 @@ def should_loop(state: TreeState) -> Literal["expand", "END"]:
         return "END"
     return "expand"
 
-
 def run_lats(state: TreeState):
     # start
     state = generate_initial_response(state)
@@ -369,7 +385,7 @@ def run_lats(state: TreeState):
             break
         state = expand(state)
         step_count += 1
-        # just to avoid infinite loops
+        # Extra safeguard
         if step_count > 10:
             break
     return state
@@ -379,8 +395,8 @@ def run_lats(state: TreeState):
 # Streamlit UI
 # -------------------------------------------------------------------------
 def main():
-    st.set_page_config(page_title="Azure OpenAI LATS (Verbose & Token Counting)", page_icon="🧠")
-    st.title("LATS with Azure OpenAI & Távily")
+    st.set_page_config(page_title="Azure OpenAI LATS (Token Cap, Távily, Refresh)", page_icon="🧠")
+    st.title("LATS with Azure + Tavily (Token Cap)")
 
     # Chat-like conversation
     if "messages" not in st.session_state:
@@ -395,8 +411,10 @@ def main():
         st.header("Configuration")
         model_choice = st.selectbox("Azure Model:", AVAILABLE_MODELS, index=0)
         verbosity_enabled = st.checkbox("Enable Verbose Mode", value=False)
-        st.write("Token Usage:", st.session_state["total_tokens_used"])
+        max_tokens = st.number_input("Max Tokens per Response", min_value=50, max_value=4096, value=500)
+        st.write("**Total Tokens Used**:", st.session_state["total_tokens_used"])
         if st.button("Clear Conversation"):
+            # Clear the messages & token usage, then rerun
             st.session_state["messages"] = [
                 {"role": "assistant", "content": "Conversation cleared. How can I help now?"}
             ]
@@ -420,7 +438,8 @@ def main():
             state = TreeState(
                 input=prompt,
                 model_name=model_choice,
-                verbose=verbosity_enabled
+                verbose=verbosity_enabled,
+                max_tokens=max_tokens
             )
 
             with st.spinner("Thinking with LATS..."):
