@@ -9,7 +9,7 @@ st.set_page_config(page_title="Reflexion Agent", page_icon="🤖")
 
 # Azure OpenAI
 from openai import AzureOpenAI
-from openai.error import OpenAIError
+from openai import OpenAIError
 
 # Távily
 from langchain_community.utilities.tavily_search import TavilySearchAPIWrapper
