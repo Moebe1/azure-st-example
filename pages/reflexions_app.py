@@ -7,6 +7,10 @@ import numexpr
 from bs4 import BeautifulSoup
 import requests
 from langchain_community.tools.tavily_search import TavilySearchResults
+from googletrans import Translator
+import datetime
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
+import nltk
 
 # =============================================================================
 # Suppress Streamlit Debug Messages
@@ -89,12 +93,22 @@ def summarize_document(url: str) -> str:
 
 tavily_search = TavilySearchResults(api_key=TAVILY_API_KEY)
 
+# Initialize the translator
+translator = Translator()
+
+# Initialize the sentiment analyzer
+nltk.download('vader_lexicon')
+sid = SentimentIntensityAnalyzer()
+
 # =============================================================================
 # Reflexion Actor Logic
 # =============================================================================
 def get_openai_response(messages, model_name):
-    prompt = """You are a helpful AI assistant. You have access to the following tool:
+    prompt = """You are a helpful AI assistant. You have access to the following tools:
     - tavily_search_results_json: Searches the web and returns results.
+    - translate_text: Translates text from one language to another.
+    - get_current_time: Gets the current time.
+    - analyze_sentiment: Analyzes the sentiment of a given text.
 
     When the user asks a question, use the tavily_search_results_json tool to search for relevant information.
     Then, based on the search results, provide a concise and accurate answer to the user's question.
@@ -134,6 +148,56 @@ def get_openai_response(messages, model_name):
                                 }
                             },
                             "required": ["query"]
+                        }
+                    }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "translate_text",
+                        "description": "Translates text from one language to another.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "text": {
+                                    "type": "string",
+                                    "description": "The text to translate."
+                                },
+                                "target_language": {
+                                    "type": "string",
+                                    "description": "The target language."
+                                },
+                            },
+                            "required": ["text", "target_language"]
+                        }
+                    }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "get_current_time",
+                        "description": "Gets the current time.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {}
+                        },
+                        "required": []
+                    }
+                },
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "analyze_sentiment",
+                        "description": "Analyzes the sentiment of a given text.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "text": {
+                                    "type": "string",
+                                    "description": "The text to analyze."
+                                }
+                            },
+                            "required": ["text"]
                         }
                     }
                 }
@@ -183,6 +247,18 @@ def process_response(response, user_question):
                                 assistant_text = "Could not synthesize the information."
                         else:
                             assistant_text = "\n\nCould not find relevant information in search results."
+                    elif function_name == "translate_text":
+                        text = eval(function_args)['text']
+                        target_language = eval(function_args)['target_language']
+                        translated_text = translator.translate(text, dest=target_language).text
+                        assistant_text = f"Translated text: {translated_text}"
+                    elif function_name == "get_current_time":
+                        current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        assistant_text = f"Current time: {current_time}"
+                    elif function_name == "analyze_sentiment":
+                        text = eval(function_args)['text']
+                        sentiment_score = sid.polarity_scores(text)['compound']
+                        assistant_text = f"Sentiment score: {sentiment_score}"
                 except Exception as e:
                     assistant_text += f"\n\nError processing tool call: {function_name} - {str(e)}"
                     logging.error(f"Error processing tool call: {function_name} - {str(e)}")
