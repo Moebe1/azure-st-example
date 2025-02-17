@@ -23,6 +23,31 @@ AVAILABLE_MODELS = [
 # =============================================================================
 def get_langchain_agent(model_choice, system_prompt, verbose):
     try:
+        from langchain.prompts import PromptTemplate
+        from langchain import LLMChain
+
+        # Define Chain-of-Thought (CoT) prompt template
+        chain_of_thought_template = PromptTemplate(
+            input_variables=["input_question"],
+            template="""
+You are a helpful AI assistant specialized in step-by-step reasoning (Chain-of-Thought).
+Please reason through the problem carefully and derive the answer.
+
+Problem: {input_question}
+
+Let's break down the steps to solve this:
+
+Step-by-Step Reasoning:
+1) Think carefully about the problem.
+2) List possible approaches or relevant information.
+3) Perform any calculations or expansions as needed.
+4) Arrive at the best possible conclusion.
+
+Final Answer:
+"""
+        )
+
+        # Create LLMChain with CoT prompt
         llm = AzureChatOpenAI(
             azure_deployment=model_choice,
             openai_api_key=AZURE_OPENAI_API_KEY,
@@ -30,6 +55,7 @@ def get_langchain_agent(model_choice, system_prompt, verbose):
             openai_api_version=AZURE_OPENAI_API_VERSION,
             streaming=True if model_choice != "o1-mini" else False
         )
+        cot_chain = LLMChain(llm=llm, prompt=chain_of_thought_template, verbose=verbose)
         tools = [Tool(name="Example Tool", func=lambda x: f"Processed: {x}", description="An example tool.")]
         agent = initialize_agent(
             tools,
@@ -104,8 +130,8 @@ def main():
                         for chunk in response_generator:
                             response_text += chunk
                             if verbosity_enabled and reasoning_expander:
-                                reasoning_expander.write(chunk)
-                            message_placeholder.write(response_text)
+                                reasoning_expander.markdown(chunk)
+                            message_placeholder.markdown(response_text)
                     else:
                         response_text = agent.run(prompt)
                         if verbosity_enabled:
