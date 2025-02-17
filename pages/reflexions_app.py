@@ -163,6 +163,32 @@ def process_response(response):
     if response and response.choices and response.choices[0].message:
         message = response.choices[0].message
         assistant_text = message.content or ""
+        logging.info(f"LLM Response Content: {assistant_text}")  # Log the LLM response
+
+        # Check for tool calls
+        if message.tool_calls:
+            logging.info(f"Tool Calls: {message.tool_calls}") # Log the tool calls
+            for tool_call in message.tool_calls:
+                function_name = tool_call.function.name
+                function_args = tool_call.function.arguments
+                logging.info(f"Function Name: {function_name}, Arguments: {function_args}") # Log function name and arguments
+
+                try:
+                    if function_name == "calculate":
+                        expression = eval(function_args)['expression']
+                        result = calculate(expression)
+                        assistant_text += f"\n\nCalculating: {expression} = {result}"
+                    elif function_name == "summarize_document":
+                        url = eval(function_args)['url']
+                        result = summarize_document(url)
+                        assistant_text += f"\n\nSummarizing document at {url}: {result}"
+                    elif function_name == "tavily_search_results_json":
+                        query = eval(function_args)['query']
+                        search_results = tavily_search.run(query)
+                        assistant_text += f"\n\nTavily Search Results: {search_results}"
+                except Exception as e:
+                    assistant_text += f"\n\nError processing tool call: {function_name} - {str(e)}"
+                    logging.error(f"Error processing tool call: {function_name} - {str(e)}") # Log any errors
     return assistant_text
 
 # =============================================================================
@@ -171,6 +197,9 @@ def process_response(response):
 def main():
     st.set_page_config(page_title="Reflexions Multi-Tool Agent", page_icon="🤖")
     st.title("Reflexions Multi-Tool Agent")
+
+    # Configure logging
+    logging.basicConfig(level=logging.INFO)
 
     if "messages" not in st.session_state:
         st.session_state["messages"] = [
