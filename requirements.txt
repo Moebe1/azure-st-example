@@ -7,7 +7,7 @@ langchain>=0.0.289
 langchain_community
 langchain_openai
 langchain-experimental
-langchain_experimental
+langsmith
 langgraph
 langchain_core
 tavily-python
