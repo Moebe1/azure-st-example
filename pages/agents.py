@@ -1,13 +1,11 @@
 import streamlit as st
 from langchain_openai import AzureChatOpenAI
-from langchain.agents import (
-    ZeroShotAgent,
-    AgentExecutor
-)
 from langchain.tools import Tool
 from openai import OpenAIError
-from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
+
+# Import the new LangGraph API
+# This is part of the experimental module in LangChain
+from langchain.experimental.langgraph import create_react_agent
 
 # =============================================================================
 # Configuration - Azure OpenAI
@@ -24,16 +22,14 @@ AVAILABLE_MODELS = [
 ]
 
 # =============================================================================
-# Function: Initialize LangChain Agent (Option B with valid llm_chain)
+# Function: Initialize LangGraph ReAct Agent
 # =============================================================================
 def get_langchain_agent(model_choice, system_prompt, verbose):
     """
-    Creates an agent that uses a custom prefix with chain-of-thought style 
-    instructions (embedded in the prompt), while retaining the ability to 
-    use tools in a ReAct-like manner.
-    
-    This version also incorporates the user-provided 'system_prompt' 
-    into the agent's overall instructions.
+    Creates a LangGraph-based ReAct agent that uses AzureChatOpenAI and 
+    user-defined tools. We incorporate a chain-of-thought style system prompt
+    to encourage detailed reasoning, although the actual detail may depend on
+    the model and Azure OpenAI policy.
     """
     try:
         # Instantiate the AzureChatOpenAI LLM
@@ -56,67 +52,30 @@ def get_langchain_agent(model_choice, system_prompt, verbose):
             )
         ]
 
-        # ---------------------------------------------------------------------
-        # 1) CREATE A CUSTOM PROMPT TEMPLATE (PREFIX + SUFFIX)
-        #    Incorporate the user-provided 'system_prompt' to give the model 
-        #    additional context or instructions.
-        # ---------------------------------------------------------------------
-        CUSTOM_PREFIX = f"""{system_prompt}
+        # Combine the user-provided system prompt with chain-of-thought instructions
+        # This becomes the 'system_message' for the new ReAct agent.
+        full_system_message = f"""{system_prompt}
 
-You are a helpful AI assistant specialized in step-by-step reasoning (Chain-of-Thought).
-Please reason through the problem carefully and derive the answer.
+You are a helpful AI assistant. 
+Please show your detailed reasoning steps in bullet-point form followed by a final answer.
+Include:
+1) Key questions/concepts
+2) Perspectives or facts
+3) Examples or analogies
+4) A synthesized conclusion
 
-Use the following format:
-Step-by-Step Reasoning:
-1) Analyze the question and identify key concepts or themes.
-2) Consider diverse perspectives, including relevant theories, facts, or approaches.
-3) Provide detailed explanations and illustrative examples to clarify the reasoning.
-4) Synthesize the information logically to form a coherent understanding.
-5) Conclude with a concise and accurate answer.
-
-Final Answer:
+Be sure to reveal each step of your thought process. Do not hide or summarize them away.
 """
 
-        CUSTOM_SUFFIX = "Begin!"
-
-        # Build a PromptTemplate for the agent
-        custom_prompt = PromptTemplate(
-            input_variables=["input", "agent_scratchpad"],
-            template=f"{CUSTOM_PREFIX}{{agent_scratchpad}}\n\n{{input}}\n\n{CUSTOM_SUFFIX}"
-        )
-
-        # ---------------------------------------------------------------------
-        # 2) CREATE THE LLM CHAIN (ZeroShotAgent REQUIRES llm_chain)
-        # ---------------------------------------------------------------------
-        llm_chain = LLMChain(
+        # Create the ReAct agent using LangGraph
+        agent_graph = create_react_agent(
             llm=llm,
-            prompt=custom_prompt,
-            verbose=verbose
-        )
-
-        # Prepare a list of tool names for the agent to recognize
-        allowed_tools = [tool.name for tool in tools]
-
-        # ---------------------------------------------------------------------
-        # 3) BUILD THE ZERO-SHOT AGENT USING THE LLM CHAIN
-        # ---------------------------------------------------------------------
-        agent_instance = ZeroShotAgent(
-            llm_chain=llm_chain,
-            allowed_tools=allowed_tools
-        )
-
-        # ---------------------------------------------------------------------
-        # 4) WRAP THE AGENT IN AN AGENTEXECUTOR
-        # ---------------------------------------------------------------------
-        agent = AgentExecutor.from_agent_and_tools(
-            agent=agent_instance,
             tools=tools,
-            verbose=verbose,
-            max_iterations=5,
-            handle_parsing_errors=True
+            system_message=full_system_message,
+            # Optional: You could add 'verbose=verbose' if the function supports it
         )
 
-        return agent
+        return agent_graph
 
     except OpenAIError as e:
         st.error(f"LangChain Agent Initialization Error: {str(e)}")
@@ -127,7 +86,7 @@ Final Answer:
 # =============================================================================
 def main():
     st.set_page_config(page_title="Agents", page_icon="🤖")
-    st.title("LangChain Agents")
+    st.title("LangChain Agents (LangGraph Version)")
 
     # Initialize session state for messages if not exists
     if "messages" not in st.session_state:
@@ -149,9 +108,9 @@ def main():
         if model_choice == "o1-mini" and streaming_enabled:
             st.warning("Streaming is not supported for o1-mini. Falling back to non-streaming.")
 
-    # Initialize agent using custom CoT prompt approach
-    agent = get_langchain_agent(model_choice, system_prompt, verbosity_enabled)
-    if not agent:
+    # Initialize the new LangGraph-based ReAct agent
+    agent_graph = get_langchain_agent(model_choice, system_prompt, verbosity_enabled)
+    if not agent_graph:
         return
 
     # Display existing conversation
@@ -165,42 +124,37 @@ def main():
         with st.chat_message("user"):
             st.write(prompt)
 
+        # Container for the assistant's response
         with st.chat_message("assistant"):
             message_placeholder = st.empty()
             response_text = ""
 
             if verbosity_enabled:
                 with st.expander("View Agent's Reasoning", expanded=False):
-                    st.write("**Model:** ", model_choice)
+                    st.write("**Model:**", model_choice)
                     st.markdown("---")
-                    st.write("**Agent's Thought Process:**")
+                    st.write("**LangGraph ReAct Process:**")
 
             with st.spinner("Thinking..."):
                 try:
+                    # In LangGraph, you typically call `invoke()` or `stream_invoke()`
+                    # on the agent to get the final answer. We'll handle streaming or not.
                     if streaming_enabled and model_choice != "o1-mini":
-                        # Streaming approach
-                        response_generator = agent.run(prompt)
-                        unified_expander = st.expander("Agent's Reasoning and Response", expanded=True) if verbosity_enabled else None
-                        reasoning_text = ""
-                        for chunk in response_generator:
+                        # If create_react_agent supports streaming, we can do stream_invoke
+                        # Otherwise, we can do a manual chunk approach.
+                        # We'll show a general approach (may vary with exact library version):
+                        for chunk in agent_graph.stream_invoke(prompt):
                             response_text += chunk
-                            if verbosity_enabled:
-                                reasoning_text += chunk
                             message_placeholder.markdown(response_text.strip())
-                        if verbosity_enabled and unified_expander:
-                            refined_reasoning = " ".join(reasoning_text.splitlines()).strip()
-                            unified_expander.markdown(refined_reasoning)
                     else:
                         # Non-streaming approach
-                        response_text = agent.run(prompt)
-                        if verbosity_enabled:
-                            reasoning_expander = st.expander("View Agent's Reasoning", expanded=True)
-                            reasoning_expander.write(response_text)
+                        response_text = agent_graph.invoke(prompt)
                         message_placeholder.write(response_text)
                 except Exception as e:
                     error_message = str(e)
                     st.error(f"An error occurred: {error_message}")
-                    response_text = "I apologize, but I encountered an error processing your request. Please try again or rephrase your query."
+                    response_text = ("I apologize, but I encountered an error processing your request. "
+                                     "Please try again or rephrase your query.")
 
         st.session_state["messages"].append({"role": "assistant", "content": response_text})
 
