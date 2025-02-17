@@ -119,23 +119,6 @@ def get_openai_response(messages, model_name):
                 {
                     "type": "function",
                     "function": {
-                        "name": "summarize_document",
-                        "description": "Summarizes the content of a document at a given URL.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "url": {
-                                    "type": "string",
-                                    "description": "The URL of the document to summarize."
-                                }
-                            },
-                            "required": ["url"]
-                        }
-                    }
-                },
-                {
-                    "type": "function",
-                    "function": {
                         "name": "tavily_search_results_json",
                         "description": "Useful for when you need to answer questions about current events. Input should be a search query.",
                         "parameters": {
@@ -160,35 +143,50 @@ def get_openai_response(messages, model_name):
 
 def process_response(response):
     assistant_text = ""
+    btc_price = None
+    energy_article_summary = None
+
     if response and response.choices and response.choices[0].message:
         message = response.choices[0].message
         assistant_text = message.content or ""
-        logging.info(f"LLM Response Content: {assistant_text}")  # Log the LLM response
+        logging.info(f"LLM Response Content: {assistant_text}")
 
         # Check for tool calls
         if message.tool_calls:
-            logging.info(f"Tool Calls: {message.tool_calls}") # Log the tool calls
+            logging.info(f"Tool Calls: {message.tool_calls}")
             for tool_call in message.tool_calls:
                 function_name = tool_call.function.name
                 function_args = tool_call.function.arguments
-                logging.info(f"Function Name: {function_name}, Arguments: {function_args}") # Log function name and arguments
+                logging.info(f"Function Name: {function_name}, Arguments: {function_args}")
 
                 try:
-                    if function_name == "calculate":
-                        expression = eval(function_args)['expression']
-                        result = calculate(expression)
-                        assistant_text += f"\n\nCalculating: {expression} = {result}"
-                    elif function_name == "summarize_document":
-                        url = eval(function_args)['url']
-                        result = summarize_document(url)
-                        assistant_text += f"\n\nSummarizing document at {url}: {result}"
-                    elif function_name == "tavily_search_results_json":
+                    if function_name == "tavily_search_results_json" and "Bitcoin price" in function_args:
                         query = eval(function_args)['query']
                         search_results = tavily_search.run(query)
-                        assistant_text += f"\n\nTavily Search Results: {search_results}"
+                        # Extract Bitcoin price from search results (this is a simplified approach)
+                        if search_results:
+                            btc_price = re.search(r"[\$\d,]+", search_results).group(0)
+                            assistant_text += f"\n\nCurrent Bitcoin price: {btc_price}"
+
+
+                    elif function_name == "calculate" and btc_price:
+                        expression = f"{btc_price} * 0.15"
+                        result = calculate(expression)
+                        assistant_text += f"\n\n15% of the Bitcoin price: {result}"
+
+                    elif function_name == "tavily_search_results_json" and "energy consumption" in function_args:
+                        query = eval(function_args)['query']
+                        search_results = tavily_search.run(query)
+                        # Extract URL of the first article (this is a simplified approach)
+                        if search_results:
+                            url = re.search(r"https?://[^\s]+", search_results).group(0)
+                            energy_article_summary = summarize_document(url)
+                            assistant_text += f"\n\nSummary of Bitcoin energy consumption article: {energy_article_summary}"
+
+
                 except Exception as e:
                     assistant_text += f"\n\nError processing tool call: {function_name} - {str(e)}"
-                    logging.error(f"Error processing tool call: {function_name} - {str(e)}") # Log any errors
+                    logging.error(f"Error processing tool call: {function_name} - {str(e)}")
     return assistant_text
 
 # =============================================================================
@@ -232,10 +230,14 @@ def main():
             with st.spinner("Thinking..."):
                 initial_prompt = f"""You are a helpful AI assistant. You have access to the following tools:
                 - calculate: Evaluates a mathematical expression and returns the result.
-                - summarize_document: Summarizes the content of a document at a given URL.
                 - tavily_search_results_json: Searches the web and returns results.
 
-                Solve the following problem: What is the current price of Bitcoin in USD? Calculate 15% of that price. Then, find a recent news article about Bitcoin's energy consumption and summarize its key points.
+                Solve the following problem: 
+                1. Use the tavily_search_results_json tool to find the current price of Bitcoin in USD.
+                2. Use the calculate tool to calculate 15% of that price.
+                3. Use the tavily_search_results_json tool to find a recent news article about Bitcoin's energy consumption.
+                4. Summarize the key points from the news article.
+                5. Combine all the information to provide a final answer that includes the current price of Bitcoin, 15% of that price, and a summary of a recent news article about Bitcoin's energy consumption.
 
                 You must use the tools provided to answer the question.
                 """
