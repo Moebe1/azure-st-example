@@ -130,21 +130,28 @@ ACTOR_PROMPT = ChatPromptTemplate.from_messages(
 
 # We'll define a chain that calls the model to produce ReflexionAnswer
 parser = JsonOutputToolsParser(return_id=True)
+
 @chain_runnable
 def reflexion_chain(inputs: dict, config: RunnableConfig):
-    # get messages from "inputs['messages']" (list of messages)
-    # We'll do n=1 completions
-    # Then parse with 'parser'
+    """
+    Creates a single-turn response from the model, returning:
+      - ai_msg in messages
+      - parsed items as tool_calls
+    so we do NOT break Azure Chat by including tool calls in the messages list.
+    """
     model_name = config["configurable"].get("model_name", "gpt-4o")
     max_tokens = config["configurable"].get("max_tokens", 500)
     verbose = config["configurable"].get("verbose", False)
 
-    # azure call:
-    messages_val = ChatPromptValue(messages=ACTOR_PROMPT.format_prompt(messages=inputs["messages"]).to_messages())
-    # We'll do one shot:
+    # Build final prompt
+    messages_val = ChatPromptValue(
+        messages=ACTOR_PROMPT.format_prompt(messages=inputs["messages"]).to_messages()
+    )
+
+    # Azure call
     resp = client.chat.completions.create(
         model=model_name,
-        messages=messages_val.to_messages(),
+        messages=messages_val.to_messages(),  # must contain role & content for each item
         stream=False,
         n=1,
         max_tokens=max_tokens
@@ -157,24 +164,32 @@ def reflexion_chain(inputs: dict, config: RunnableConfig):
 
     if not resp or not resp.choices:
         # fallback
-        return {"messages": [AIMessage(content="No response")]}
-    
-    # The single response
-    ai_msg = resp.choices[0].message.to_dict()
-    # We'll parse with parser
-    parsed = parser.invoke(ai_msg)
-    return {"messages": [ai_msg] + parsed}
+        return {
+            "messages": [AIMessage(content="No response")],
+            "tool_calls": []
+        }
 
-# Revision node can re-run the same approach if needed
+    ai_msg = resp.choices[0].message.to_dict()  # has role='assistant'
+    parsed = parser.invoke(ai_msg)  # might contain tool calls
+
+    # Instead of returning {"messages": [ai_msg] + parsed}, do:
+    # We store the AI message in "messages" and the parser results in "tool_calls".
+    # This ensures we do NOT feed invalid dicts to Azure next time.
+    return {
+        "messages": [ai_msg],
+        "tool_calls": parsed
+    }
+
+# We'll re-use reflexion_chain for "revision_chain" if needed
 revision_chain = reflexion_chain
 
 # =============================================================================
 # Defining the Graph for Reflexion
 # =============================================================================
 class ReflexionState(TypedDict):
-    messages: List[Any]  # to store conversation or partial responses
+    messages: List[Any]      # the conversation
+    tool_calls: List[Any]    # any parser outputs from the last step
 
-# We'll define a small graph: draft -> tool -> revise -> end or loop
 builder = StateGraph(ReflexionState)
 builder.add_node("draft", reflexion_chain)
 builder.add_node("tool", tool_node)
@@ -189,20 +204,17 @@ builder.add_edge("tool", "revise")
 MAX_ITERATIONS = 3
 
 def reflexion_loop(state: ReflexionState) -> str:
-    # count how many times we've invoked reflexion
-    # if reached 3 => end
-    # else => tool
+    # count how many times we've invoked the chain
     expansions = 0
-    for msg in state["messages"]:
-        # measure how many times "tool_call" or "AI" we've done
-        if isinstance(msg, dict) and msg.get("tool_calls"):
+    for call in state.get("tool_calls", []):
+        if isinstance(call, dict) and call.get("type") == "tool_call":
             expansions += 1
+
     if expansions >= MAX_ITERATIONS:
         return END
     return "tool"
 
 builder.add_conditional_edges("revise", reflexion_loop, ["tool", END])
-
 reflexion_graph = builder.compile()
 
 # =============================================================================
@@ -213,16 +225,6 @@ def get_langchain_agent(model_choice: str, system_prompt: str, verbose: bool):
     Re-implements the get_langchain_agent but now as a Reflexion agent, 
     using the same signature so we do not break the existing code or API.
     """
-    # We ignore 'system_prompt' or incorporate it if we like
-    # We'll store it in st session if needed
-    # We'll return the reflexion_graph. We'll store "model_choice" in the config
-    # so the user can call .invoke or .stream_invoke
-    # We'll do a simple approach: return the compiled graph reference
-    # so we can run "agent.run(...)"
-
-    # We'll store the system prompt for reference in an invisible node if you want,
-    # but here we simply append it as a "system" message at the front
-    # or we can just incorporate it as a user prompt on the first call
     agent = reflexion_graph
     return agent
 
@@ -236,6 +238,9 @@ def main():
     if "total_tokens_used" not in st.session_state:
         st.session_state["total_tokens_used"] = 0
 
+    if "tool_calls" not in st.session_state:
+        st.session_state["tool_calls"] = []
+
     with st.sidebar:
         st.header("Configuration")
         model_choice = st.selectbox("Azure Model:", AVAILABLE_MODELS, index=0)
@@ -248,6 +253,7 @@ def main():
             st.session_state["messages"] = [
                 {"role": "assistant", "content": "Conversation cleared. How can I help now?"}
             ]
+            st.session_state["tool_calls"] = []
             st.session_state["total_tokens_used"] = 0
             st.experimental_rerun()
 
@@ -256,62 +262,55 @@ def main():
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
 
-    # Chat input
     if prompt := st.chat_input("Ask a question..."):
         st.session_state["messages"].append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.write(prompt)
 
         with st.chat_message("assistant"):
-            message_placeholder = st.empty()
-
+            msg_placeholder = st.empty()
             # Build a reflexion state
-            reflexion_state: ReflexionState = {"messages": st.session_state["messages"]}
+            reflexion_state: ReflexionState = {
+                "messages": st.session_state["messages"],
+                "tool_calls": st.session_state["tool_calls"]
+            }
 
-            # We'll configure the agent
             agent = get_langchain_agent(model_choice, system_prompt, verbosity_enabled)
+            config = {
+                "configurable": {
+                    "model_name": model_choice,
+                    "verbose": verbosity_enabled,
+                    "max_tokens": max_tokens
+                },
+                "callbacks": None
+            }
 
-            # Build a final output text
             response_text = ""
             try:
-                config = {
-                    "configurable": {
-                        "model_name": model_choice,
-                        "verbose": verbosity_enabled,
-                        "max_tokens": max_tokens
-                    },
-                    "callbacks": None
-                }
-                # We'll do a single pass or a streaming approach
-                # This is a multi-step graph, so we can do .stream(...) or .stream_invoke(...)
-                # We'll do:
                 for step_output in agent.stream(reflexion_state, stream_mode="values", config=config):
-                    # step_output is a dict like {"draft": <state>} or {"tool": <state>} or ...
-                    name, data = next(iter(step_output.items()))
-                    # data["messages"] is the updated conversation
-                    reflexion_state = data  # keep updating
+                    # step_output is a dict like {"draft": <ReflexionState>} or {"tool": <ReflexionState>} ...
+                    node_name, node_data = next(iter(step_output.items()))
+                    reflexion_state = node_data  # updated state
 
-                # after the final iteration, we get the best solution
-                # the last "messages" in reflexion_state likely has an AI answer
+                # reflexion_state["messages"] likely has the final AI message
                 final_msg = ""
-                # find the last AI message
                 for msg in reversed(reflexion_state["messages"]):
                     if isinstance(msg, dict) and msg.get("role") == "assistant":
                         final_msg = msg.get("content", "")
                         break
-
-                # Clean whitespace
                 final_msg = re.sub(r'[ \t]+$', '', final_msg, flags=re.MULTILINE)
                 final_msg = re.sub(r'^\s*\n', '', final_msg)
                 final_msg = re.sub(r'\n\s*$', '', final_msg)
+
                 response_text = final_msg
-                message_placeholder.write(response_text)
+                msg_placeholder.write(final_msg)
             except Exception as e:
                 st.error(f"Error: {e}")
                 response_text = "I encountered an error. Please try again."
 
         st.session_state["messages"].append({"role": "assistant", "content": response_text})
-
+        # Also store updated tool_calls
+        st.session_state["tool_calls"] = reflexion_state.get("tool_calls", [])
 
 if __name__ == "__main__":
     main()
