@@ -294,7 +294,7 @@ def main():
             ]
 
     for msg in st.session_state["messages"]:
-        with st.chat_message(msg["role"]):
+        with st.chat_message(msg["role"], key=f"chat_message_{i}"):
             st.write(msg["content"])
 
         if prompt := st.chat_input("Type your message here…", key="user_prompt"):
