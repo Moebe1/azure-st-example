@@ -8,6 +8,9 @@ from bs4 import BeautifulSoup
 import requests
 from langchain_community.tools.tavily_search import TavilySearchResults
 
+# Define the maximum number of iterations for improvement
+max_iterations = 3
+
 # =============================================================================
 # Suppress Streamlit Debug Messages
 # =============================================================================
@@ -189,7 +192,6 @@ def validate_response(response_content):
 
 def process_response(response, user_question, model_choice):
     assistant_text = ""
-    max_iterations = 3  # Define the maximum number of iterations for improvement
     iteration = 0
     use_revise_answer = False
 
