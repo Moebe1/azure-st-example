@@ -101,7 +101,7 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
     """
     prompt = f"""You are a helpful AI assistant. You have access to the following tool:
     - tavily_search_results_json: Searches the web and returns results.
-    You must use the tool to answer the question.
+    You must use the tool to answer the question. After using the tool, you MUST synthesize the information into a complete and user-friendly answer.
     """
     messages = [{"role": "system", "content": prompt}] + messages
 
@@ -219,30 +219,34 @@ def process_response(response, user_question, model_choice):
                         st.session_state["reflections"].append(reflection)
                     
                     elif function_name == "tavily_search_results_json":
-                        query = eval(function_args)['query']
-                        search_results = tavily_search.run(query)
-                        if search_results and isinstance(search_results, list):
-                            # Concatenate the content of all search results
-                            combined_content = "\n".join([result.get("content", "") for result in search_results if isinstance(result, dict)])
-                            # Include the user's question and search results in the messages sent to the OpenAI API
-                            messages = [
-                                {"role": "user", "content": user_question},
-                                {"role": "assistant", "content": f"Search results: {combined_content}"}
-                            ]
-                            response = get_openai_response(
-                                messages, model_choice, use_revise_answer
-                            )
-                            if response and response.choices and response.choices[0].message:
-                                assistant_text = response.choices[0].message.content or ""
+                        try:
+                            query = eval(function_args)['query']
+                            search_results = tavily_search.run(query)
+                            if search_results and isinstance(search_results, list):
+                                # Concatenate the content of all search results
+                                combined_content = "\n".join([result.get("content", "") for result in search_results if isinstance(result, dict)])
+                                # Include the user's question and search results in the messages sent to the OpenAI API
+                                messages = [
+                                    {"role": "user", "content": user_question},
+                                    {"role": "assistant", "content": f"Search results: {combined_content}"}
+                                ]
+                                response = get_openai_response(
+                                    messages, model_choice, use_revise_answer
+                                )
+                                if response and response.choices and response.choices[0].message:
+                                    assistant_text = response.choices[0].message.content or ""
+                                else:
+                                    assistant_text = "Could not synthesize the information."
                             else:
-                                assistant_text = "Could not synthesize the information."
-                        else:
-                            assistant_text = "\n\nCould not find relevant information in search results."
+                                assistant_text = "\n\nCould not find relevant information in search results."
+                        except Exception as e:
+                            assistant_text += f"\n\nError processing tool call: {function_name} - {str(e)}"
+                            logging.error(f"Error processing tool call: {function_name} - {str(e)}")
                     else:
                         assistant_text += f"\n\nUnknown function: {function_name}"
                 except Exception as e:
-                    assistant_text += f"\n\nError processing tool call: {function_name} - {str(e)}"
-                    logging.error(f"Error processing tool call: {function_name} - {str(e)}")
+                    assistant_text += f"\n\nError processing tool call: {str(e)}"
+                    logging.error(f"Error processing tool call: {str(e)}")
             else:
                 assistant_text = message.content or ""
 
