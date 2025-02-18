@@ -46,7 +46,10 @@ class Reflection(BaseModel):
 class AnswerQuestion(BaseModel):
     answer: str = Field(description="~250 word detailed answer to the question.")
     reflection: Reflection = Field(description="Your reflection on the initial answer.")
-    revised_answer: str = Field(description="Revised answer based on the reflection.")
+
+class ReviseAnswer(AnswerQuestion):
+    """Revise your original answer to your question. Provide an answer and reflection."""
+    pass
 
 # =============================================================================
 # Tool Definitions
@@ -92,52 +95,61 @@ tavily_search = TavilySearchResults(api_key=TAVILY_API_KEY)
 # =============================================================================
 # Reflexion Actor Logic
 # =============================================================================
-def get_openai_response(messages, model_name):
-    prompt = """You are a helpful AI assistant. You have access to the following tool:
+def get_openai_response(messages, model_name, use_revise_answer=False):
+    """
+    Gets a response from the OpenAI API, using the AnswerQuestion or ReviseAnswer tool.
+    """
+    prompt = f"""You are a helpful AI assistant. You have access to the following tool:
     - tavily_search_results_json: Searches the web and returns results.
-
-    When the user asks a question, use the tavily_search_results_json tool to search for relevant information.
-    Then, based on the search results, provide a concise and accurate answer to the user's question.
-    It is very important that you synthesize the information from the tool calls into a complete and user-friendly answer.
-    Do not just execute tools, but also process and present the findings in a clear and concise manner.
-
-    For example, if the user asks: "What is the currency used in France? What is the current exchange rate of 1 unit of that currency to Australian Dollars?",
-    you should use the tavily_search_results_json tool to search for the currency used in France, and then use the tavily_search_results_json tool again to search for the exchange rate of that currency to Australian Dollars.
-    Then, you should synthesize the information into a complete and user-friendly answer, such as: "The currency used in France is the Euro (EUR). The current exchange rate is 1 EUR = 1.65 Australian Dollars."
-
-    If the search results are ambiguous or contradictory, you should acknowledge the uncertainty and explain the conflicting information to the user, rather than simply presenting the raw data.
-
-    Remember, you are a helpful assistant that provides complete and understandable answers, not just raw data.
-
-    The final answer should be in the following format: "The currency used in France is [Currency Name]. The current exchange rate is 1 [Currency Name] = [Exchange Rate] Australian Dollars."
-
-    Optimize the prompt for improved reasoning and information extraction from the search results, focusing on identifying the relevant information and discarding irrelevant details.
+    You must use the tool to answer the question.
     """
     messages = [{"role": "system", "content": prompt}] + messages
+
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "tavily_search_results_json",
+                "description": "Useful for when you need to answer questions about current events. Input should be a search query.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The search query to use."
+                        }
+                    },
+                    "required": ["query"]
+                }
+            }
+        }
+    ]
+
+    if use_revise_answer:
+        function_name = "ReviseAnswer"
+        function_description = "Revise your original answer to your question. Provide an answer and reflection."
+        parameters = ReviseAnswer.model_json_schema()
+    else:
+        function_name = "AnswerQuestion"
+        function_description = "Answer the question. Provide an answer and reflection."
+        parameters = AnswerQuestion.model_json_schema()
+
+    function_tool = {
+        "type": "function",
+        "function": {
+            "name": function_name,
+            "description": function_description,
+            "parameters": parameters,
+        }
+    }
+    tools.append(function_tool)
+
     try:
         response = client.chat.completions.create(
             model=model_name,
             messages=messages,
             stream=False,
-            tools=[
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "tavily_search_results_json",
-                        "description": "Useful for when you need to answer questions about current events. Input should be a search query.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "query": {
-                                    "type": "string",
-                                    "description": "The search query to use."
-                                }
-                            },
-                            "required": ["query"]
-                        }
-                    }
-                }
-            ],
+            tools=tools,
             tool_choice="auto"
         )
         return response
@@ -175,64 +187,78 @@ def validate_response(response_content):
     except OpenAIError as e:
         return False, f"Error during external evaluation: {str(e)}"
 
-def process_response(response, user_question):
+def process_response(response, user_question, model_choice):
     assistant_text = ""
     max_iterations = 3  # Define the maximum number of iterations for improvement
     iteration = 0
+    use_revise_answer = False
 
     while iteration < max_iterations:
         if response and response.choices and response.choices[0].message:
             message = response.choices[0].message
-            assistant_text = message.content or ""
-            logging.info(f"LLM Response Content (Iteration {iteration + 1}): {assistant_text}")
+            tool_calls = message.tool_calls
+            logging.info(f"LLM Response Content (Iteration {iteration + 1}): {message.content}")
 
-            # Validate the response
-            is_valid, feedback = validate_response(assistant_text)
-            if is_valid:
-                logging.info("Validation successful.")
-                break  # Exit the loop if the response is valid
-            else:
-                logging.warning(f"Validation failed: {feedback}")
-                assistant_text += f"\n\nValidation Feedback: {feedback}"
+            if tool_calls:
+                tool_call = tool_calls[0]
+                function_name = tool_call.function.name
+                function_args = tool_call.function.arguments
+                logging.info(f"Function Name: {function_name}, Arguments: {function_args}")
 
-            # Check for tool calls
-            if message.tool_calls:
-                logging.info(f"Tool Calls: {message.tool_calls}")
-                for tool_call in message.tool_calls:
-                    function_name = tool_call.function.name
-                    function_args = tool_call.function.arguments
-                    logging.info(f"Function Name: {function_name}, Arguments: {function_args}")
+                try:
+                    if function_name == "AnswerQuestion":
+                        answer_data = AnswerQuestion.model_validate_json(function_args)
+                        assistant_text = answer_data.answer
+                        reflection = answer_data.reflection.dict()
+                        st.session_state["reflections"].append(reflection)
 
-                    try:
-                        if function_name == "tavily_search_results_json":
-                            query = eval(function_args)['query']
-                            search_results = tavily_search.run(query)
-                            if search_results and isinstance(search_results, list):
-                                # Concatenate the content of all search results
-                                combined_content = "\n".join([result.get("content", "") for result in search_results if isinstance(result, dict)])
-                                # Include the user's question and search results in the messages sent to the OpenAI API
-                                messages = [
-                                    {"role": "user", "content": user_question},
-                                    {"role": "assistant", "content": f"Search results: {combined_content}"}
-                                ]
-                                response = client.chat.completions.create(
-                                    model="gpt-4o",  # Or another suitable model
-                                    messages=messages,
-                                    stream=False
-                                )
-                                if response and response.choices and response.choices[0].message:
-                                    assistant_text = response.choices[0].message.content or ""
-                                else:
-                                    assistant_text = "Could not synthesize the information."
+                    elif function_name == "ReviseAnswer":
+                        answer_data = ReviseAnswer.model_validate_json(function_args)
+                        assistant_text = answer_data.answer
+                        reflection = answer_data.reflection.dict()
+                        st.session_state["reflections"].append(reflection)
+                    
+                    elif function_name == "tavily_search_results_json":
+                        query = eval(function_args)['query']
+                        search_results = tavily_search.run(query)
+                        if search_results and isinstance(search_results, list):
+                            # Concatenate the content of all search results
+                            combined_content = "\n".join([result.get("content", "") for result in search_results if isinstance(result, dict)])
+                            # Include the user's question and search results in the messages sent to the OpenAI API
+                            messages = [
+                                {"role": "user", "content": user_question},
+                                {"role": "assistant", "content": f"Search results: {combined_content}"}
+                            ]
+                            response = get_openai_response(
+                                messages, model_choice, use_revise_answer
+                            )
+                            if response and response.choices and response.choices[0].message:
+                                assistant_text = response.choices[0].message.content or ""
                             else:
-                                assistant_text = "\n\nCould not find relevant information in search results."
-                    except Exception as e:
-                        assistant_text += f"\n\nError processing tool call: {function_name} - {str(e)}"
-                        logging.error(f"Error processing tool call: {function_name} - {str(e)}")
-        iteration += 1
+                                assistant_text = "Could not synthesize the information."
+                        else:
+                            assistant_text = "\n\nCould not find relevant information in search results."
+                    else:
+                        assistant_text += f"\n\nUnknown function: {function_name}"
+                except Exception as e:
+                    assistant_text += f"\n\nError processing tool call: {function_name} - {str(e)}"
+                    logging.error(f"Error processing tool call: {function_name} - {str(e)}")
+            else:
+                assistant_text = message.content or ""
+
+            iteration += 1
+            if iteration < max_iterations:
+                # Prepare for the next iteration, using ReviseAnswer
+                messages = st.session_state["messages"] + [{"role": "assistant", "content": assistant_text}]
+                response = get_openai_response(messages, model_choice, use_revise_answer=True)
+                use_revise_answer = True # Ensure ReviseAnswer is used in subsequent iterations
+        else:
+            assistant_text = "Could not get a valid response from the model."
+            break
 
     if iteration == max_iterations:
-        logging.warning("Maximum iterations reached without a valid response.")
+        logging.warning("Maximum iterations reached.")
+
     return assistant_text
 
 # =============================================================================
@@ -249,6 +275,7 @@ def main():
         st.session_state["messages"] = [
             {"role": "assistant", "content": "Hello! How can I assist you today?"}
         ]
+        st.session_state["reflections"] = []
 
     with st.sidebar:
         st.header("Configuration")
@@ -276,10 +303,10 @@ def main():
             with st.spinner("Thinking..."):
                 messages = st.session_state["messages"]
                 response = get_openai_response(messages, model_choice)
-                assistant_text = process_response(response, prompt)
-
+                assistant_text = process_response(response, prompt, model_choice)
+ 
                 st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
-                message_placeholder.write(assistant_text)
+                message_placeholder.markdown(assistant_text)
 
             # Reflection and revision (removed for simplicity)
 
