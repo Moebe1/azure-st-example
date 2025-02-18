@@ -76,7 +76,6 @@ def summarize_document(url: str) -> str:
         response.raise_for_status()  # Raise HTTPError for bad responses (4xx or 5xx)
         soup = BeautifulSoup(response.content, "html.parser")
         text = ' '.join(soup.stripped_strings)
-
         # Summarize the text using OpenAI
         messages = [{"role": "user", "content": f"Summarize the following text:\n{text}"}]
         summary_response = client.chat.completions.create(
@@ -293,7 +292,7 @@ def main():
                 {"role": "assistant", "content": "Conversation cleared. How can I help you now?"}
             ]
 
-    for msg in st.session_state["messages"]:
+    for i, msg in enumerate(st.session_state["messages"]):
         with st.chat_message(msg["role"], key=f"chat_message_{i}"):
             st.write(msg["content"])
 
