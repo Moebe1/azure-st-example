@@ -145,47 +145,94 @@ def get_openai_response(messages, model_name):
         st.error(f"OpenAI API Error: {str(e)}")
         return None
 
+def validate_response(response_content):
+    """
+    Validates the response content against task-specific criteria using the gpt-4o-mini model.
+    Returns a tuple (is_valid, feedback) where is_valid is a boolean
+    and feedback is a string describing any issues.
+    """
+    if not response_content:
+        return False, "Response is empty."
+    if len(response_content) > 1000:
+        return False, "Response exceeds the maximum allowed length."
+
+    # Use gpt-4o-mini for external evaluation
+    try:
+        evaluation_prompt = f"Evaluate the following response for correctness and completeness:\n\n{response_content}"
+        evaluation_response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": evaluation_prompt}],
+            stream=False
+        )
+        if evaluation_response and evaluation_response.choices and evaluation_response.choices[0].message:
+            feedback = evaluation_response.choices[0].message.content or "No feedback provided."
+            if "valid" in feedback.lower():
+                return True, feedback
+            else:
+                return False, feedback
+        else:
+            return False, "External evaluator did not return a valid response."
+    except OpenAIError as e:
+        return False, f"Error during external evaluation: {str(e)}"
+
 def process_response(response, user_question):
     assistant_text = ""
-    if response and response.choices and response.choices[0].message:
-        message = response.choices[0].message
-        assistant_text = message.content or ""
-        logging.info(f"LLM Response Content: {assistant_text}")
+    max_iterations = 3  # Define the maximum number of iterations for improvement
+    iteration = 0
 
-        # Check for tool calls
-        if message.tool_calls:
-            logging.info(f"Tool Calls: {message.tool_calls}")
-            for tool_call in message.tool_calls:
-                function_name = tool_call.function.name
-                function_args = tool_call.function.arguments
-                logging.info(f"Function Name: {function_name}, Arguments: {function_args}")
+    while iteration < max_iterations:
+        if response and response.choices and response.choices[0].message:
+            message = response.choices[0].message
+            assistant_text = message.content or ""
+            logging.info(f"LLM Response Content (Iteration {iteration + 1}): {assistant_text}")
 
-                try:
-                    if function_name == "tavily_search_results_json":
-                        query = eval(function_args)['query']
-                        search_results = tavily_search.run(query)
-                        if search_results and isinstance(search_results, list):
-                            # Concatenate the content of all search results
-                            combined_content = "\n".join([result.get("content", "") for result in search_results if isinstance(result, dict)])
-                            # Include the user's question and search results in the messages sent to the OpenAI API
-                            messages = [
-                                {"role": "user", "content": user_question},
-                                {"role": "assistant", "content": f"Search results: {combined_content}"}
-                            ]
-                            response = client.chat.completions.create(
-                                model="gpt-4o",  # Or another suitable model
-                                messages=messages,
-                                stream=False
-                            )
-                            if response and response.choices and response.choices[0].message:
-                                assistant_text = response.choices[0].message.content or ""
+            # Validate the response
+            is_valid, feedback = validate_response(assistant_text)
+            if is_valid:
+                logging.info("Validation successful.")
+                break  # Exit the loop if the response is valid
+            else:
+                logging.warning(f"Validation failed: {feedback}")
+                assistant_text += f"\n\nValidation Feedback: {feedback}"
+
+            # Check for tool calls
+            if message.tool_calls:
+                logging.info(f"Tool Calls: {message.tool_calls}")
+                for tool_call in message.tool_calls:
+                    function_name = tool_call.function.name
+                    function_args = tool_call.function.arguments
+                    logging.info(f"Function Name: {function_name}, Arguments: {function_args}")
+
+                    try:
+                        if function_name == "tavily_search_results_json":
+                            query = eval(function_args)['query']
+                            search_results = tavily_search.run(query)
+                            if search_results and isinstance(search_results, list):
+                                # Concatenate the content of all search results
+                                combined_content = "\n".join([result.get("content", "") for result in search_results if isinstance(result, dict)])
+                                # Include the user's question and search results in the messages sent to the OpenAI API
+                                messages = [
+                                    {"role": "user", "content": user_question},
+                                    {"role": "assistant", "content": f"Search results: {combined_content}"}
+                                ]
+                                response = client.chat.completions.create(
+                                    model="gpt-4o",  # Or another suitable model
+                                    messages=messages,
+                                    stream=False
+                                )
+                                if response and response.choices and response.choices[0].message:
+                                    assistant_text = response.choices[0].message.content or ""
+                                else:
+                                    assistant_text = "Could not synthesize the information."
                             else:
-                                assistant_text = "Could not synthesize the information."
-                        else:
-                            assistant_text = "\n\nCould not find relevant information in search results."
-                except Exception as e:
-                    assistant_text += f"\n\nError processing tool call: {function_name} - {str(e)}"
-                    logging.error(f"Error processing tool call: {function_name} - {str(e)}")
+                                assistant_text = "\n\nCould not find relevant information in search results."
+                    except Exception as e:
+                        assistant_text += f"\n\nError processing tool call: {function_name} - {str(e)}"
+                        logging.error(f"Error processing tool call: {function_name} - {str(e)}")
+        iteration += 1
+
+    if iteration == max_iterations:
+        logging.warning("Maximum iterations reached without a valid response.")
     return assistant_text
 
 # =============================================================================
