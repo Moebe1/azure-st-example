@@ -227,6 +227,7 @@ def process_response(response, user_question, model_choice):
                             if search_results and isinstance(search_results, list):
                                 # Concatenate the content of all search results
                                 combined_content = "\n".join([result.get("content", "") for result in search_results if isinstance(result, dict)])
+                                logging.info(f"Search Results: {combined_content}")
                                 # Include the user's question and search results in the messages sent to the OpenAI API
                                 messages = [
                                     {"role": "user", "content": user_question},
@@ -296,23 +297,23 @@ def main():
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
 
-    if prompt := st.chat_input("Type your message here…"):
-        st.session_state["messages"].append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.write(prompt)
+        if prompt := st.chat_input("Type your message here…"):
+            st.session_state["messages"].append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.write(prompt)
 
-        with st.chat_message("assistant"):
-            message_placeholder = st.empty()
-            assistant_text = ""
+            with st.chat_message("assistant"):
+                message_placeholder = st.empty()
+                assistant_text = ""
 
-            # Initial response
-            with st.spinner("Thinking..."):
-                messages = st.session_state["messages"]
-                response = get_openai_response(messages, model_choice)
-                assistant_text = process_response(response, prompt, model_choice)
+                # Initial response
+                with st.spinner("Thinking..."):
+                    messages = st.session_state["messages"]
+                    response = get_openai_response(messages, model_choice)
+                    assistant_text = process_response(response, prompt, model_choice)
  
-                st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
-                message_placeholder.markdown(assistant_text)
+                    st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
+                    message_placeholder.markdown(assistant_text)
 
             # Reflection and revision (removed for simplicity)
 
