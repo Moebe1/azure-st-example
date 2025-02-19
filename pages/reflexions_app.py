@@ -392,7 +392,7 @@ def process_response(response, user_question, model_choice, status_placeholder):
                         reflection = answer_data.reflection.dict()
                         st.session_state["reflections"].append(reflection)
                         
-                    elif function_name == "tavily_search_results_json" and not use_revise_answer:
+                    elif function_name in ["tavily_search_results_json", "brave_search_results_json"] and not use_revise_answer:
                         try:
                             query = eval(function_args)['query']
                             search_queries.append(query)
