@@ -392,10 +392,15 @@ def process_response(response, user_question, model_choice, status_placeholder):
                         reflection = answer_data.reflection.dict()
                         st.session_state["reflections"].append(reflection)
                         
-                    elif function_name in ["tavily_search_results_json", "brave_search_results_json"] and not use_revise_answer:
+                    elif function_name == "tavily_search_results_json" and not use_revise_answer:
                         try:
                             query = eval(function_args)['query']
-                            search_queries.append(query)
+                        except Exception as e:
+                            assistant_text += f"\n\nError processing tool call: {function_name} - {str(e)}"
+                            logging.error(f"Error processing tool call: {function_name} - {str(e)}")
+                    elif function_name == "brave_search_results_json" and not use_revise_answer:
+                        try:
+                            query = eval(function_args)['query']
                         except Exception as e:
                             assistant_text += f"\n\nError processing tool call: {function_name} - {str(e)}"
                             logging.error(f"Error processing tool call: {function_name} - {str(e)}")
