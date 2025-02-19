@@ -190,6 +190,7 @@ def validate_response(response_content):
         return False, f"Error during external evaluation: {str(e)}"
 
 def process_response(response, user_question, model_choice):
+    logging.info("Entering process_response function") # ADDED LOGGING
     assistant_text = ""
     iteration = 0
     use_revise_answer = False
