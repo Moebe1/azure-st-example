@@ -203,6 +203,8 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
         logging.info("Using cached OpenAI response")
         return st.session_state.response_cache[cache_key]
 
+    search_tool_name = "brave_search_results_json" if st.session_state.get("search_provider", "brave") == "brave" else "tavily_search_results_json"
+
     tools = [
         {
             "type": "function",
@@ -218,6 +220,23 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
                 "name": "ReviseAnswer",
                 "description": "Refine and improve the response with additional details if needed.",
                 "parameters": ReviseAnswer.model_json_schema(),
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": search_tool_name,
+                "description": "Retrieve web search results.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The search query to use."
+                        }
+                    },
+                    "required": ["query"]
+                }
             }
         }
     ]
