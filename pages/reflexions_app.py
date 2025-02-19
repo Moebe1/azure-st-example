@@ -317,7 +317,9 @@ def main():
             with st.spinner("Thinking..."):
                 if prompt and prompt.strip():
                     messages = st.session_state["messages"]
+                    logging.info("Calling get_openai_response") # ADDED LOGGING
                     response = get_openai_response(messages, model_choice)
+                    logging.info("Returned from get_openai_response, calling process_response") # ADDED LOGGING
                     assistant_text = process_response(response, prompt, model_choice)
                 else:
                     assistant_text = ""
