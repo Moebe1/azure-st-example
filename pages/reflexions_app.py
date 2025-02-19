@@ -108,7 +108,11 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
     - tavily_search_results_json: Searches the web and returns results.
     - AnswerQuestion: Provides an answer to the question.
     - ReviseAnswer: Revises the original answer to the question.
-    You must use the tavily_search_results_json tool to answer the question. After using the tool, you MUST synthesize the information into a complete and user-friendly answer using the AnswerQuestion or ReviseAnswer tool.
+    You must use the tavily_search_results_json tool to answer the question. After using the tool, you MUST synthesize the information into a complete and user-friendly answer using the AnswerQuestion or ReviseAnswer tool. When performing calculations, present each step clearly using LaTeX formatting. For example:
+    "Perform the multiplication: \( 15 \times 3.2 = 48 \)."
+    "Perform the division: \( \frac{100}{4} = 25 \)."
+    "Add the results: \( 48 + 25 = 73 \)."
+    The final result is 73.
     """
     messages = [{"role": "system", "content": prompt}] + messages
 
