@@ -213,7 +213,7 @@ def process_response(response, user_question, model_choice, status_placeholder):
             logging.info(f"Tool Calls: {tool_calls}") # ADDED LOGGING
 
             search_queries = [] # Collect search queries
-            latex_pattern = r"(\\(.*?\\\))" # Regex to find latex expressions
+            latex_pattern = r"(\\(.*?\\))" # Regex to find latex expressions
             if tool_calls:
                 for tool_call in tool_calls: # Iterate through all tool calls
                     function_name = tool_call.function.name
