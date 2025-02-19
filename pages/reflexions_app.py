@@ -274,7 +274,14 @@ def process_response(response, user_question, model_choice):
                                         function_name = tool_call.function.name
                                         function_args = tool_call.function.arguments
 
-                                        if function_name == "AnswerQuestion":
+                                        if function_name == "tavily_search_results_json":
+                                            try:
+                                                query = eval(function_args)['query']
+                                                search_queries.append(query)
+                                            except Exception as e:
+                                                assistant_text += f"\n\nError processing tool call: {function_name} - {str(e)}"
+                                                logging.error(f"Error processing tool call: {function_name} - {str(e)}")
+                                        elif function_name == "AnswerQuestion":
                                             answer_data = AnswerQuestion.model_validate_json(function_args)
                                             assistant_text = answer_data.answer
                                             reflection = answer_data.reflection.dict()
@@ -286,6 +293,7 @@ def process_response(response, user_question, model_choice):
                                             st.session_state["reflections"].append(reflection)
                                         else:
                                             assistant_text += f"\n\nUnknown function: {function_name}"
+
                                 else:
                                     assistant_text = message.content or "Could not synthesize information from search results."
                             else:
