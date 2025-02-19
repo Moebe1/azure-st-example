@@ -11,7 +11,7 @@ from langchain_community.tools.tavily_search import TavilySearchResults
 # Define iteration limits
 answer_iterations_limit = 3
 reflection_iterations_limit = 2
-max_iterations = answer_iterations_limit + reflection_iterations_limit # Total max iterations
+#max_iterations = answer_iterations_limit + reflection_iterations_limit # Total max iterations
 iteration_type = "answer" # Start with answer generation
 
 # =============================================================================
@@ -199,7 +199,7 @@ def process_response(response, user_question, model_choice, status_placeholder):
     assistant_text = ""
     iteration = 0
     use_revise_answer = False
-
+    max_iterations = st.session_state.get("max_iterations", 5) # Default to 5 if not set
     while iteration < max_iterations:
         if response and response.choices and response.choices[0].message:
             message = response.choices[0].message
@@ -360,6 +360,9 @@ def main():
     with st.sidebar:
         st.header("Configuration")
         model_choice = st.selectbox("Select the Azure deployment:", AVAILABLE_MODELS, index=0)
+
+        max_iterations = st.slider("Max Iterations:", min_value=1, max_value=10, value=5, step=1)
+        st.session_state["max_iterations"] = max_iterations
 
         if st.button("Clear Conversation"):
             st.session_state["messages"] = [
