@@ -208,13 +208,17 @@ def process_response(response, user_question, model_choice):
 
                 try:
                     if function_name == "AnswerQuestion":
+                        logging.info(f"AnswerQuestion function_args: {function_args}") # ADDED LOGGING
                         answer_data = AnswerQuestion.model_validate_json(function_args)
+                        logging.info(f"AnswerQuestion answer_data: {answer_data}") # ADDED LOGGING
                         assistant_text = answer_data.answer
                         reflection = answer_data.reflection.dict()
                         st.session_state["reflections"].append(reflection)
 
                     elif function_name == "ReviseAnswer":
+                        logging.info(f"ReviseAnswer function_args: {function_args}") # ADDED LOGGING
                         answer_data = ReviseAnswer.model_validate_json(function_args)
+                        logging.info(f"ReviseAnswer answer_data: {answer_data}") # ADDED LOGGING
                         assistant_text = answer_data.answer
                         reflection = answer_data.reflection.dict()
                         st.session_state["reflections"].append(reflection)
