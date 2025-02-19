@@ -436,11 +436,15 @@ def main():
     # Configure logging
     logging.basicConfig(level=logging.INFO)
 
+    # Initialize session state variables
     if "messages" not in st.session_state:
         st.session_state["messages"] = [
             {"role": "assistant", "content": "Hello! How can I assist you today?"}
         ]
-
+    
+    if "search_provider" not in st.session_state:
+        st.session_state["search_provider"] = "brave"  # Set default search provider
+        
     st.session_state["reflections"] = []
 
     with st.sidebar:
@@ -451,7 +455,7 @@ def main():
         search_provider = st.selectbox(
             "Search Provider:",
             ["brave", "tavily"],
-            index=0 if st.session_state.search_provider == "brave" else 1,
+            index=0 if st.session_state.get("search_provider", "brave") == "brave" else 1,
             key="search_provider_select"
         )
         st.session_state.search_provider = search_provider
