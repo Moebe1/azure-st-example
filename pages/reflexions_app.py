@@ -214,6 +214,7 @@ def process_response(response, user_question, model_choice):
                     function_name = tool_call.function.name
                     function_args = tool_call.function.arguments
                     logging.info(f"Function Name: {function_name}, Arguments: {function_args}")
+                    status_placeholder.text(f"Using tool: {function_name}")
 
                     if function_name == "AnswerQuestion":
                         logging.info(f"AnswerQuestion function_args: {function_args}") # ADDED LOGGING
@@ -224,6 +225,7 @@ def process_response(response, user_question, model_choice):
                         st.session_state["reflections"].append(reflection)
 
                     elif function_name == "ReviseAnswer":
+                        status_placeholder.text(f"Using tool: {function_name}")
                         logging.info(f"ReviseAnswer function_args: {function_args}") # ADDED LOGGING
                         answer_data = ReviseAnswer.model_validate_json(function_args)
                         logging.info(f"ReviseAnswer answer_data: {answer_data}") # ADDED LOGGING
@@ -232,6 +234,7 @@ def process_response(response, user_question, model_choice):
                         st.session_state["reflections"].append(reflection)
                     
                     elif function_name == "tavily_search_results_json":
+                        status_placeholder.text(f"Using tool: {function_name}")
                         try:
                             query = eval(function_args)['query']
                             search_queries.append(query)
@@ -275,6 +278,7 @@ def process_response(response, user_question, model_choice):
                                         logging.info(f"Tool Call Function Object: {tool_call.function}")
                                         function_name = tool_call.function.name
                                         function_args = tool_call.function.arguments
+                                        status_placeholder.text(f"Using tool: {function_name}")
 
                                         if function_name == "tavily_search_results_json":
                                             try:
@@ -285,11 +289,13 @@ def process_response(response, user_question, model_choice):
                                                 logging.error(f"Error processing tool call: {function_name} - {str(e)}")
                                                 logging.exception(e) # ADDED LOGGING
                                         elif function_name == "AnswerQuestion":
+                                            status_placeholder.text(f"Using tool: {function_name}")
                                             answer_data = AnswerQuestion.model_validate_json(function_args)
                                             assistant_text = answer_data.answer
                                             reflection = answer_data.reflection.dict()
                                             st.session_state["reflections"].append(reflection)
                                         elif function_name == "ReviseAnswer":
+                                            status_placeholder.text(f"Using tool: {function_name}")
                                             answer_data = ReviseAnswer.model_validate_json(function_args)
                                             assistant_text = answer_data.answer
                                             reflection = answer_data.reflection.dict()
@@ -373,12 +379,14 @@ def main():
 
         with st.chat_message("assistant"):
             message_placeholder = st.empty()
+            status_placeholder = st.empty() # For ephemeral status updates
             assistant_text = ""
 
             # Initial response
             with st.spinner("Thinking..."):
                 if prompt and prompt.strip():
                     messages = st.session_state["messages"]
+                    status_placeholder.text("Generating response...")
                     logging.info("Calling get_openai_response") # ADDED LOGGING
                     response = get_openai_response(messages, model_choice)
                     logging.info("Returned from get_openai_response, calling process_response") # ADDED LOGGING
@@ -389,15 +397,17 @@ def main():
                 st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
                 if assistant_text:
                     message_placeholder.markdown(assistant_text)
+                    status_placeholder.empty() # Clear the status message
 
-                # Display reflections directly in the chat message
+                # Display reflections in an expander
                 if len(st.session_state["reflections"]) > 0:
-                    reflections_output = ""
-                    for i, r in enumerate(st.session_state["reflections"], start=1):
-                        reflections_output += f"**Reflection {i}:**  \n- Missing: {r.get('missing','')}  \n- Superfluous: {r.get('superfluous','')}  \n---  \n"
-                    # Add reflections to the chat with markdown
-                    message_placeholder.markdown("#### Reflections\n" + reflections_output)
-                    logging.info(f"Reflections Output: {reflections_output}") # ADDED LOGGING
+                    with st.expander("Reflections"):
+                        reflections_output = ""
+                        for i, r in enumerate(st.session_state["reflections"], start=1):
+                            reflections_output += f"**Reflection {i}:**  \n- Missing: {r.get('missing','')}  \n- Superfluous: {r.get('superfluous','')}  \n---  \n"
+                        # Add reflections to the chat with markdown
+                        st.markdown(reflections_output)
+                        logging.info(f"Reflections Output: {reflections_output}") # ADDED LOGGING
 
     # Reflection and revision (restored from reference)
     st.markdown("### Reflections")
