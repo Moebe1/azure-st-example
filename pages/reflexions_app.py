@@ -24,27 +24,41 @@ class BraveSearchResults:
         self.last_request_time = 0  # Track the last request time
 
     def run(self, query: str) -> List[Dict[str, Any]]:
-        """Run query through Brave Search and return results with rate limiting."""
+        """Run query through Brave Search and return results with improved rate limiting."""
         try:
-            # Calculate time since last request
-            current_time = time.time()
-            time_since_last_request = current_time - self.last_request_time
-            
-            # If less than 1 second has passed, sleep for the remaining time
-            if time_since_last_request < 1.0:
-                time.sleep(1.0 - time_since_last_request)
-            
-            # Make the request
-            response = requests.get(
-                self.base_url,
-                headers=self.headers,
-                params={"q": query}
-            )
-            
-            # Update last request time
-            self.last_request_time = time.time()
-            response.raise_for_status()
-            data = response.json()
+            backoff_time = 1.0  # Initial backoff time in seconds
+            max_retries = 5
+            retries = 0
+
+            while retries < max_retries:
+                # Calculate time since last request
+                current_time = time.time()
+                time_since_last_request = current_time - self.last_request_time
+
+                # If less than 1 second has passed, sleep for the remaining time
+                if time_since_last_request < 1.0:
+                    time.sleep(1.0 - time_since_last_request)
+
+                # Make the request
+                response = requests.get(
+                    self.base_url,
+                    headers=self.headers,
+                    params={"q": query}
+                )
+
+                # Update last request time
+                self.last_request_time = time.time()
+
+                if response.status_code == 429:
+                    logging.warning("Brave Search API rate limit exceeded. Retrying...")
+                    time.sleep(backoff_time)
+                    backoff_time *= 2  # Exponential backoff
+                    retries += 1
+                    continue
+
+                response.raise_for_status()
+                data = response.json()
+                break  # Exit loop if request is successful
             
             # Extract and format web results
             results = []
@@ -368,7 +382,7 @@ def process_response(response, user_question, model_choice, status_placeholder):
                     if function_name == "AnswerQuestion":
                         answer_data = AnswerQuestion.model_validate_json(function_args)
                         assistant_text = answer_data.answer
-                        reflection = answer_data.reflection.dict()
+                        reflection = answer_data.reflection.dict() if hasattr(answer_data, "reflection") else {"missing": "No reflection provided.", "superfluous": "No reflection provided."}
                         st.session_state["reflections"].append(reflection)
 
                     elif function_name == "ReviseAnswer":
