@@ -213,7 +213,7 @@ def process_response(response, user_question, model_choice, status_placeholder):
             logging.info(f"Tool Calls: {tool_calls}") # ADDED LOGGING
 
             search_queries = [] # Collect search queries
-            latex_pattern = r"(\\(.*?\\))" # Regex to find latex expressions
+            latex_pattern = r"(\\(.*?\\)|\\\[.*?\\\])" # Regex to find latex expressions
             if tool_calls:
                 for tool_call in tool_calls: # Iterate through all tool calls
                     function_name = tool_call.function.name
@@ -349,8 +349,16 @@ def process_response(response, user_question, model_choice, status_placeholder):
         latex_matches = re.findall(latex_pattern, assistant_text)
         for match in latex_matches:
             try:
-                sanitized_match = match[0].strip()
-                st.latex(sanitized_match)
+                if match[0].startswith(r"\\["):
+                    # Handle \[...\] format
+                    latex_expression = match[0][1:-1]  # Remove \[ and \]
+                    latex_expression = r"\(" + latex_expression + r"\)"  # Convert to \(...\)
+                    sanitized_match = latex_expression.strip()
+                    st.latex(sanitized_match)
+                else:
+                    # Handle \(...\) format
+                    sanitized_match = match[0].strip()
+                    st.latex(sanitized_match)
             except Exception as e:
                 logging.error(f"Error formatting latex: {str(e)}")
     return assistant_text
