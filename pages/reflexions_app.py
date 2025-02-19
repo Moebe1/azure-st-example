@@ -203,6 +203,7 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
         logging.info("Using cached OpenAI response")
         return st.session_state.response_cache[cache_key]
 
+    tools = []  # Define the tools list
     response = get_cached_openai_response(str(messages), model_name, tools)
     if response:
         st.session_state.response_cache[cache_key] = response
