@@ -156,7 +156,7 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
             tools=tools,
             tool_choice="auto"
         )
-        logging.info(f"Raw OpenAI API Response: {response.model_dump_json()}") # FIXED LOGGING: Use model_dump_json()
+        #logging.info(f"Raw OpenAI API Response: {response.model_dump_json()}") # FIXED LOGGING: Use model_dump_json()
         if response is None: # ADDED LOGGING
             logging.error("OpenAI API response is None") # ADDED LOGGING
         return response
