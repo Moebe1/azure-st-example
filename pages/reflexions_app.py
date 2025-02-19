@@ -21,7 +21,7 @@ class BraveSearchResults:
             "Accept": "application/json",
         }
         self.base_url = "https://api.search.brave.com/res/v1/web/search"
-        self.last_request_time = 0  # Track the last request time (shared across instances)
+        self.last_request_time = 0  # Track the last request time (instance-specific)
 
     def run(self, query: str) -> List[Dict[str, Any]]:
         """Run query through Brave Search and return results with improved rate limiting."""
@@ -47,7 +47,7 @@ class BraveSearchResults:
                 )
 
                 # Update last request time
-                BraveSearchResults.last_request_time = time.time()
+                self.last_request_time = time.time()
 
                 if response.status_code == 429:
                     logging.warning("Brave Search API rate limit exceeded. Retrying...")
@@ -270,20 +270,7 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
             }
         })
         
-        tools.append({
-            "type": "function",
-            "function": {
-                "name": "tavily_search_results_json",
-                "description": "Web search using Tavily.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "The search query to use."}
-                    },
-                    "required": ["query"]
-                }
-            }
-        })
+        # Removed duplicate registration of tavily_search_results_json
 
     # Convert messages to string for caching
     messages_str = str(messages)
@@ -305,7 +292,7 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
         st.session_state.response_cache[cache_key] = response
         logging.info("Cached new OpenAI response")
         return response
-    except OpenAIError as e:
+    except (OpenAIError, Exception) as e:
         st.error(f"OpenAI API Error: {str(e)}")
         return None
 
@@ -396,6 +383,8 @@ def process_response(response, user_question, model_choice, status_placeholder):
         logging.info(f"Cleared expired cache entry for query: {query}")
 
     while iteration < max_iterations:
+        if assistant_text:
+            break  # Exit early if a valid response is obtained
         if iteration >= 3 and "No relevant search results found" in assistant_text:
             st.error("No valid data was found. Try a different query.")
             return assistant_text  # Stop refining
@@ -424,7 +413,7 @@ def process_response(response, user_question, model_choice, status_placeholder):
                         assistant_text = answer_data.answer
                         reflection = answer_data.reflection.dict()
                         st.session_state["reflections"].append(reflection)
-                    search_tool_name = st.session_state.get("search_provider", "brave") + "_search_results_json"
+                    search_tool_name = (st.session_state.get("search_provider") or "brave") + "_search_results_json"
                     if function_name != search_tool_name:
                         logging.warning(f"Ignoring search call to {function_name}, using {search_tool_name} instead.")
                         continue  # Skip the incorrect search function
