@@ -22,7 +22,6 @@ class BraveSearchResults:
         }
         self.base_url = "https://api.search.brave.com/res/v1/web/search"
         self.last_request_time = 0  # Track the last request time (shared across instances)
-        self.lock = time.time()  # Global lock for rate limiting
 
     def run(self, query: str) -> List[Dict[str, Any]]:
         """Run query through Brave Search and return results with improved rate limiting."""
@@ -270,6 +269,21 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
                 }
             }
         })
+        
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": "tavily_search_results_json",
+                "description": "Web search using Tavily.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "The search query to use."}
+                    },
+                    "required": ["query"]
+                }
+            }
+        })
 
     # Convert messages to string for caching
     messages_str = str(messages)
@@ -410,11 +424,13 @@ def process_response(response, user_question, model_choice, status_placeholder):
                         assistant_text = answer_data.answer
                         reflection = answer_data.reflection.dict()
                         st.session_state["reflections"].append(reflection)
-
                     search_tool_name = st.session_state.get("search_provider", "brave") + "_search_results_json"
-                    if function_name == search_tool_name and not use_revise_answer:
+                    if function_name != search_tool_name:
+                        logging.warning(f"Ignoring search call to {function_name}, using {search_tool_name} instead.")
+                        continue  # Skip the incorrect search function
+                    elif function_name == search_tool_name and not use_revise_answer:
                         try:
-                            query = eval(function_args)['query']
+                            query = json.loads(function_args)['query']
                         except Exception as e:
                             assistant_text += f"\n\nError processing tool call: {function_name} - {str(e)}"
                             logging.error(f"Error processing tool call: {function_name} - {str(e)}")
@@ -427,13 +443,13 @@ def process_response(response, user_question, model_choice, status_placeholder):
                     # Preserve order while getting unique queries, limited to first 3
                     seen = set()
                     unique_queries = [x for x in search_queries if not (x in seen or seen.add(x))][:3]
-                    
+
                     for query in unique_queries:
                         # Skip if query was already made in this session
                         if query in st.session_state.search_requests_made:
                             logging.info(f"Skipping duplicate search: {query}")
-                            continue  # Skip re-searching
-                        
+                            continue  # Prevent duplicate searches
+
                         try:
                             if query in st.session_state.search_cache:
                                 search_results = st.session_state.search_cache[query]
@@ -454,20 +470,20 @@ def process_response(response, user_question, model_choice, status_placeholder):
                                     st.session_state.search_requests_made.add(query)
                                 else:
                                     raise ValueError("No valid search results returned.")
-                            
+
                             if search_results and isinstance(search_results, list):
                                 combined_content += "\n".join([result.get("content", "") for result in search_results])
                             else:
                                 assistant_text += f"\n\nNo relevant information found for query: {query}"
                         except Exception as e:
                             logging.error(f"Error during search for query '{query}': {str(e)}")
-                            
+
                             # Alert user and suggest switching providers
                             st.warning(f"Search provider '{st.session_state.search_provider}' failed. "
-                                     "Try switching to Tavily in the sidebar settings.")
-                            
+                                       "Try switching to Tavily in the sidebar settings.")
+
                             assistant_text += f"\n\n⚠️ Search failed using {st.session_state.search_provider}. Try switching to Tavily."
-                    
+
                     if combined_content:
                         messages = [
                             {"role": "user", "content": user_question},
@@ -507,6 +523,8 @@ def main():
         del st.session_state["response_cache"]
     if "search_cache" in st.session_state:
         del st.session_state["search_cache"]
+    if "search_requests_made" in st.session_state:
+        del st.session_state["search_requests_made"]
 
     st.set_page_config(page_title="Reflexions Multi-Tool Agent", page_icon="🤖")
     st.title("Reflexions Multi-Tool Agent")
