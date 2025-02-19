@@ -330,6 +330,8 @@ def process_response(response, user_question, model_choice):
         logging.warning("Maximum iterations reached.")
 
     logging.info(f"Assistant Text before return: {assistant_text}") # FIXED LOGGING
+    if not assistant_text:
+        assistant_text = "Reached maximum iterations without a final answer."
     return assistant_text
 
 # =============================================================================
