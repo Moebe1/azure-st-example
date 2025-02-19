@@ -362,7 +362,8 @@ def process_response(response, user_question, model_choice, status_placeholder):
                         assistant_text = answer_data.answer
                         reflection = answer_data.reflection.model_dump()
                         st.session_state["reflections"].append(reflection)
-                    search_tool_name = (st.session_state.get("search_provider") or "brave") + "_search_results_json"
+                    search_tool_name = "BraveSearchResults" if st.session_state.get("search_provider") == "brave" \
+                  else "TavilySearchResults"
                     if function_name != search_tool_name:
                         logging.warning(f"Ignoring search call to {function_name}, using {search_tool_name} instead.")
                         continue  # Skip the incorrect search function
