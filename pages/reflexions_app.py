@@ -269,6 +269,8 @@ def process_response(response, user_question, model_choice):
                                 tool_calls = message.tool_calls or [] # Handle case with no tool_calls
                                 if tool_calls:
                                     for tool_call in tool_calls:
+                                        logging.info(f"Tool Call Object: {tool_call}")
+                                        logging.info(f"Tool Call Function Object: {tool_call.function}")
                                         function_name = tool_call.function.name
                                         function_args = tool_call.function.arguments
 
