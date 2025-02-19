@@ -238,24 +238,7 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
     
     # Only include search tool if not in revision phase
     if not use_revise_answer:
-        tools.append({
-            "type": "function",
-            "function": {
-                "name": "tavily_search_results_json",
-                "description": "Web search using Brave Search (default) or Tavily with automatic fallback. Use for questions requiring current or factual information.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "The search query to use."
-                        }
-                    },
-                    "required": ["query"]
-                }
-            }
-        })
-        search_tool_name = "brave_search_results_json" if st.session_state.search_provider == "brave" else "tavily_search_results_json"
+        search_tool_name = "brave_search_results_json" if st.session_state.get("search_provider", "brave") == "brave" else "tavily_search_results_json"
 
         tools.append({
             "type": "function",
@@ -410,8 +393,9 @@ def process_response(response, user_question, model_choice, status_placeholder):
                         assistant_text = answer_data.answer
                         reflection = answer_data.reflection.dict()
                         st.session_state["reflections"].append(reflection)
-                        
-                    elif function_name == st.session_state.search_provider + "_search_results_json" and not use_revise_answer:
+
+                    search_tool_name = st.session_state.get("search_provider", "brave") + "_search_results_json"
+                    if function_name == search_tool_name and not use_revise_answer:
                         try:
                             query = eval(function_args)['query']
                         except Exception as e:
@@ -505,6 +489,12 @@ def process_response(response, user_question, model_choice, status_placeholder):
 # Main Streamlit App
 # =============================================================================
 def main():
+    # Clear the session state manually before running the app:
+    if "response_cache" in st.session_state:
+        del st.session_state["response_cache"]
+    if "search_cache" in st.session_state:
+        del st.session_state["search_cache"]
+
     st.set_page_config(page_title="Reflexions Multi-Tool Agent", page_icon="🤖")
     st.title("Reflexions Multi-Tool Agent")
 
