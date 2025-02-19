@@ -212,9 +212,9 @@ def process_response(response, user_question, model_choice, status_placeholder):
             logging.info(f"LLM Response Content (Iteration {iteration + 1}): {message.content}")
             logging.info(f"Tool Calls: {tool_calls}") # ADDED LOGGING
 
+            search_queries = [] # Collect search queries
+            latex_pattern = r"(\(.*?\))" # Regex to find latex expressions
             if tool_calls:
-                search_queries = [] # Collect search queries
-                latex_pattern = r"(\(.*?\))" # Regex to find latex expressions
                 for tool_call in tool_calls: # Iterate through all tool calls
                     function_name = tool_call.function.name
                     function_args = tool_call.function.arguments
