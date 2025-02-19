@@ -102,7 +102,7 @@ tavily_search = TavilySearchResults(api_key=TAVILY_API_KEY)
 # Reflexion Actor Logic
 # =============================================================================
 @st.cache_data(ttl=3600)  # Cache for 1 hour
-def get_cached_openai_response(messages_str, model_name):
+def get_cached_openai_response(messages_str, model_name, tools_config):
     """
     Cached wrapper for OpenAI API calls.
     """
@@ -111,7 +111,7 @@ def get_cached_openai_response(messages_str, model_name):
             model=model_name,
             messages=eval(messages_str),  # Convert string back to list of dicts
             stream=False,
-            tools=tools,
+            tools=tools_config,
             tool_choice="auto"
         )
         return response
@@ -193,7 +193,7 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
 
     # If not in cache, get new response
     try:
-        response = get_cached_openai_response(messages_str, model_name)
+        response = get_cached_openai_response(messages_str, model_name, tools)
         if response is None:
             logging.error("OpenAI API response is None")
             return None
