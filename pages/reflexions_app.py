@@ -236,6 +236,16 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
         }
     ]
     
+    if not use_revise_answer:
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": "ReviseAnswer",
+                "description": "Refine and improve the response with additional details if needed.",
+                "parameters": ReviseAnswer.model_json_schema(),
+            }
+        })
+    
     # Only include search tool if not in revision phase
     if not use_revise_answer:
         search_tool_name = "brave_search_results_json" if st.session_state.get("search_provider", "brave") == "brave" else "tavily_search_results_json"
@@ -369,6 +379,10 @@ def process_response(response, user_question, model_choice, status_placeholder):
         logging.info(f"Cleared expired cache entry for query: {query}")
 
     while iteration < max_iterations:
+        if iteration >= 3 and "No relevant search results found" in assistant_text:
+            st.error("No valid data was found. Try a different query.")
+            return assistant_text  # Stop refining
+
         if response and response.choices and response.choices[0].message:
             message = response.choices[0].message
             tool_calls = message.tool_calls or []
@@ -419,7 +433,9 @@ def process_response(response, user_question, model_choice, status_placeholder):
                                 if search_results and isinstance(search_results, list):
                                     combined_content += "\n".join([result.get("content", "") for result in search_results])
                                 logging.info(f"Using cached results for query: {query}")
-                            continue
+                            else:
+                                logging.info(f"Reusing previous search for: {query}")
+                                continue  # Prevent unnecessary re-execution
                         
                         try:
                             if query in st.session_state.search_cache:
