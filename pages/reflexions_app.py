@@ -9,7 +9,7 @@ import requests
 from langchain_community.tools.tavily_search import TavilySearchResults
 
 # Define the maximum number of iterations for improvement
-max_iterations = 3
+max_iterations = 5
 
 # =============================================================================
 # Suppress Streamlit Debug Messages
@@ -340,6 +340,7 @@ def main():
     # Reflection and revision (restored from reference)
     st.markdown("### Reflections")
     if "reflections" in st.session_state and len(st.session_state["reflections"]) > 0:
+        logging.info(f"st.session_state['reflections']: {st.session_state['reflections']}") # ADDED LOGGING
         for idx, reflection in enumerate(st.session_state["reflections"], start=1):
             st.markdown(f"**Reflection {idx}:**")
             st.json(reflection)
