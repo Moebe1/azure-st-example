@@ -224,7 +224,7 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
         {
             "type": "function",
             "function": {
-                "name": search_tool_name,
+                "name": "brave_search_results_json",
                 "description": "Retrieve web search results.",
                 "parameters": {
                     "type": "object",
@@ -273,13 +273,11 @@ def validate_response(response_content):
 def needs_search(question: str) -> bool:
     """Determines if a question requires web search based on its content."""
     no_search_patterns = [
-        r"^how (do|does|can|would|should)",
         r"^what (is|are) the difference",
         r"^explain",
         r"^describe",
         r"^calculate",
         r"\d[\+\-\*\/\=]",
-        r"(who|what|where|when) is",
         r"define .*"
     ]
 
