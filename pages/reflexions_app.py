@@ -6,6 +6,7 @@ import logging
 import numexpr
 from bs4 import BeautifulSoup
 import requests
+import time
 from langchain_community.tools.tavily_search import TavilySearchResults
 
 # Define iteration limits
@@ -100,15 +101,44 @@ tavily_search = TavilySearchResults(api_key=TAVILY_API_KEY)
 # =============================================================================
 # Reflexion Actor Logic
 # =============================================================================
+@st.cache_data(ttl=3600)  # Cache for 1 hour
+def get_cached_openai_response(messages_str, model_name):
+    """
+    Cached wrapper for OpenAI API calls.
+    """
+    try:
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=eval(messages_str),  # Convert string back to list of dicts
+            stream=False,
+            tools=tools,
+            tool_choice="auto"
+        )
+        return response
+    except OpenAIError as e:
+        st.error(f"OpenAI API Error: {str(e)}")
+        return None
+
 def get_openai_response(messages, model_name, use_revise_answer=False):
     """
-    Gets a response from the OpenAI API.
+    Gets a response from the OpenAI API with caching.
     """
+    # Initialize response cache if not exists
+    if "response_cache" not in st.session_state:
+        st.session_state.response_cache = {}
+        
     prompt = f"""You are a helpful AI assistant. You have access to the following tools:
-    - tavily_search_results_json: Searches the web and returns results.
+    - tavily_search_results_json: Searches the web and returns results. Only use this for questions requiring current or factual information.
     - AnswerQuestion: Provides an answer to the question.
     - ReviseAnswer: Revises the original answer to the question.
-    You must use the tavily_search_results_json tool to answer the question. After using the tool, you MUST synthesize the information into a complete and user-friendly answer using the AnswerQuestion or ReviseAnswer tool. When performing calculations, present each step clearly using LaTeX formatting. Always enclose ONLY the mathematical expressions in \(...\) to ensure proper rendering. Do not include any surrounding text within the \(...\) environment. For example:
+    
+    IMPORTANT SEARCH GUIDELINES:
+    1. Only use search for questions requiring current information, facts, statistics, or specific data.
+    2. Avoid searching for general knowledge, concepts, or how-to explanations.
+    3. When searching, use specific and focused queries (max 3) rather than broad ones.
+    4. Reuse previous search results when possible instead of making new searches.
+    
+    After using any tool, synthesize the information into a complete and user-friendly answer using the AnswerQuestion or ReviseAnswer tool. When performing calculations, present each step clearly using LaTeX formatting. Always enclose ONLY the mathematical expressions in \(...\) to ensure proper rendering. Do not include any surrounding text within the \(...\) environment. For example:
     "Perform the multiplication: \( 15 \times 3.2 = 48 \)."
     "Perform the division: \( \frac{100}{4} = 25 \)."
     "Add the results: \( 48 + 25 = 73 \)."
@@ -152,17 +182,25 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
         }
     ]
 
+    # Convert messages to string for caching
+    messages_str = str(messages)
+    cache_key = f"{messages_str}_{model_name}"
+
+    # Check if we have a cached response
+    if cache_key in st.session_state.response_cache:
+        logging.info("Using cached OpenAI response")
+        return st.session_state.response_cache[cache_key]
+
+    # If not in cache, get new response
     try:
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=messages,
-            stream=False,
-            tools=tools,
-            tool_choice="auto"
-        )
-        #logging.info(f"Raw OpenAI API Response: {response.model_dump_json()}") # FIXED LOGGING: Use model_dump_json()
-        if response is None: # ADDED LOGGING
-            logging.error("OpenAI API response is None") # ADDED LOGGING
+        response = get_cached_openai_response(messages_str, model_name)
+        if response is None:
+            logging.error("OpenAI API response is None")
+            return None
+            
+        # Cache the response
+        st.session_state.response_cache[cache_key] = response
+        logging.info("Cached new OpenAI response")
         return response
     except OpenAIError as e:
         st.error(f"OpenAI API Error: {str(e)}")
@@ -198,12 +236,68 @@ def validate_response(response_content):
     except OpenAIError as e:
         return False, f"Error during external evaluation: {str(e)}"
 
+def needs_search(question: str) -> bool:
+    """
+    Determines if a question requires web search based on its content.
+    Returns True if the question likely needs current or factual information,
+    False for questions that can be answered with general knowledge.
+    """
+    # Questions that likely don't need search
+    no_search_patterns = [
+        r"^how (do|does|can|would|should)",  # How-to questions
+        r"^what (is|are) the difference",     # Definition/comparison questions
+        r"^explain",                          # Explanatory questions
+        r"^describe",                         # Descriptive questions
+        r"^calculate",                        # Mathematical questions
+        r"\d[\+\-\*\/\=]",                   # Mathematical expressions
+    ]
+    
+    # Questions that likely need search
+    search_patterns = [
+        r"latest|recent|current|new|update",  # Time-sensitive information
+        r"(in|for|during) \d{4}",            # Specific year references
+        r"statistics|data|numbers",           # Data-driven questions
+        r"price|cost|market",                # Market-related information
+        r"news|event",                       # Current events
+    ]
+    
+    # Check if question matches no-search patterns
+    for pattern in no_search_patterns:
+        if re.search(pattern, question.lower()):
+            logging.info(f"Question matches no-search pattern: {pattern}")
+            return False
+            
+    # Check if question matches search patterns
+    for pattern in search_patterns:
+        if re.search(pattern, question.lower()):
+            logging.info(f"Question matches search pattern: {pattern}")
+            return True
+            
+    # Default to True to maintain existing behavior for unmatched patterns
+    return True
+
 def process_response(response, user_question, model_choice, status_placeholder):
     logging.info("Entering process_response function") # ADDED LOGGING
     assistant_text = ""
     iteration = 0
     use_revise_answer = False
     max_iterations = st.session_state.get("max_iterations", 5) # Default to 5 if not set
+    
+    # Initialize search cache and timestamp in session state if not exists
+    if "search_cache" not in st.session_state:
+        st.session_state.search_cache = {}
+        st.session_state.search_cache_timestamps = {}
+    
+    # Clear expired cache entries (older than 1 hour)
+    current_time = time.time()
+    expired_queries = [
+        query for query, timestamp in st.session_state.search_cache_timestamps.items()
+        if current_time - timestamp > 3600  # 1 hour TTL
+    ]
+    for query in expired_queries:
+        del st.session_state.search_cache[query]
+        del st.session_state.search_cache_timestamps[query]
+        logging.info(f"Cleared expired cache entry for query: {query}")
 
     while iteration < max_iterations:
         if response and response.choices and response.choices[0].message:
@@ -250,12 +344,26 @@ def process_response(response, user_question, model_choice, status_placeholder):
                     else:
                         assistant_text += f"\n\nUnknown function: {function_name}"
 
-                # Perform batched search if there are any search queries
-                if search_queries:
+                # Check if search is needed and limit number of searches
+                if search_queries and needs_search(user_question):
                     combined_content = ""
-                    for query in search_queries:
+                    # Batch process queries and limit to 3 queries
+                    unique_queries = list(set(search_queries))[:3]  # Remove duplicates and limit to 3 queries
+                    logging.info(f"Processing {len(unique_queries)} unique search queries")
+                    for query in unique_queries:
                         try:
-                            search_results = tavily_search.run(query)
+                            # Check cache first
+                            if query in st.session_state.search_cache:
+                                search_results = st.session_state.search_cache[query]
+                                logging.info(f"Cache hit for query: {query}")
+                            else:
+                                search_results = tavily_search.run(query)
+                                # Cache the results with timestamp
+                                if search_results and isinstance(search_results, list):
+                                    st.session_state.search_cache[query] = search_results
+                                    st.session_state.search_cache_timestamps[query] = time.time()
+                                    logging.info(f"Cached results for query: {query} at {time.strftime('%Y-%m-%d %H:%M:%S')}")
+
                             if search_results and isinstance(search_results, list):
                                 # Concatenate the content of all search results
                                 combined_content += "\n".join([result.get("content", "") for result in search_results if isinstance(result, dict)])
