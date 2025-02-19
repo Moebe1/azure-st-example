@@ -296,25 +296,28 @@ def main():
         with st.chat_message(msg["role"]):
             st.write(msg["content"])
 
-        if prompt := st.chat_input("Type your message here…", key="main_chat_input"):
+    # After rendering all messages, create a single chat input
+    with st.expander("Send a message", expanded=True, key="chat_input_expander"):
+        prompt = st.chat_input("Type your message here...", key="main_chat_input")
+        if prompt:
             st.session_state["messages"].append({"role": "user", "content": prompt})
             with st.chat_message("user"):
                 st.write(prompt)
 
-            with st.chat_message("assistant"):
-                message_placeholder = st.empty()
-                assistant_text = ""
+        with st.chat_message("assistant"):
+            message_placeholder = st.empty()
+            assistant_text = ""
 
-                # Initial response
-                with st.spinner("Thinking..."):
-                    messages = st.session_state["messages"]
-                    response = get_openai_response(messages, model_choice)
-                    assistant_text = process_response(response, prompt, model_choice)
- 
-                    st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
-                    message_placeholder.markdown(assistant_text)
+            # Initial response
+            with st.spinner("Thinking..."):
+                messages = st.session_state["messages"]
+                response = get_openai_response(messages, model_choice)
+                assistant_text = process_response(response, prompt, model_choice)
 
-            # Reflection and revision (removed for simplicity)
+                st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
+                message_placeholder.markdown(assistant_text)
+
+    # Reflection and revision (removed for simplicity)
 
 if __name__ == "__main__":
     main()
