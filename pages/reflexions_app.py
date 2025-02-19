@@ -272,13 +272,13 @@ def validate_response(response_content):
 
 def needs_search(question: str) -> bool:
     """Determines if a question requires web search based on its content."""
-    no_search_patterns = [
-        r"^explain",
-        r"^describe",
-        r"^calculate",
-        r"\d[\+\-\*\/\=]",
-        r"define .*"
-    ]
+    # no_search_patterns = [
+    #     r"^explain",
+    #     r"^describe",
+    #     r"^calculate",
+    #     r"\d[\+\-\*\/\=]",
+    #     r"define .*"
+    # ]
 
     search_patterns = [
         r"(latest|recent|current|new|update)",
@@ -287,7 +287,8 @@ def needs_search(question: str) -> bool:
         r"price|cost|market",
         r"news|event",
         r"breaking news",
-        r"confirmed reports"
+        r"confirmed reports",
+        r"weather in"
     ]
 
     if any(re.search(pattern, question.lower()) for pattern in no_search_patterns):
