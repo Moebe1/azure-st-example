@@ -475,6 +475,12 @@ def process_response(response, user_question, model_choice, status_placeholder):
 # Main Streamlit App
 # =============================================================================
 def main():
+    """
+    Note: If you encounter "inotify watch limit reached" error on Linux:
+    1. Check current limits: `cat /proc/sys/fs/inotify/max_user_watches`
+    2. Increase the limit temporarily: `sudo sysctl fs.inotify.max_user_watches=524288`
+    3. Make it permanent: Add `fs.inotify.max_user_watches=524288` to /etc/sysctl.conf
+    """
     st.set_page_config(page_title="Reflexions Multi-Tool Agent", page_icon="🤖")
     st.title("Reflexions Multi-Tool Agent")
 
