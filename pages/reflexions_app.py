@@ -349,7 +349,7 @@ def process_response(response, user_question, model_choice, status_placeholder):
         latex_matches = re.findall(latex_pattern, assistant_text)
         for match in latex_matches:
             try:
-                sanitized_match = match.strip()
+                sanitized_match = match[0].strip()
                 st.latex(sanitized_match)
             except Exception as e:
                 logging.error(f"Error formatting latex: {str(e)}")
