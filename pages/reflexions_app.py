@@ -21,7 +21,8 @@ class BraveSearchResults:
             "Accept": "application/json",
         }
         self.base_url = "https://api.search.brave.com/res/v1/web/search"
-        self.last_request_time = 0  # Track the last request time
+        self.last_request_time = 0  # Track the last request time (shared across instances)
+        self.lock = time.time()  # Global lock for rate limiting
 
     def run(self, query: str) -> List[Dict[str, Any]]:
         """Run query through Brave Search and return results with improved rate limiting."""
@@ -36,8 +37,8 @@ class BraveSearchResults:
                 time_since_last_request = current_time - self.last_request_time
 
                 # If less than 1 second has passed, sleep for the remaining time
-                if time_since_last_request < 1.0:
-                    time.sleep(1.0 - time_since_last_request)
+                if time_since_last_request < 1.2:
+                    time.sleep(1.2 - time_since_last_request)
 
                 # Make the request
                 response = requests.get(
@@ -47,12 +48,12 @@ class BraveSearchResults:
                 )
 
                 # Update last request time
-                self.last_request_time = time.time()
+                BraveSearchResults.last_request_time = time.time()
 
                 if response.status_code == 429:
                     logging.warning("Brave Search API rate limit exceeded. Retrying...")
                     time.sleep(backoff_time)
-                    backoff_time *= 2  # Exponential backoff
+                    backoff_time = min(backoff_time * 2, 10)  # Exponential backoff with a max cap of 10 seconds
                     retries += 1
                     continue
 
