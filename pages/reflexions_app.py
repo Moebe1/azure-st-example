@@ -193,108 +193,21 @@ def get_cached_openai_response(messages_str, model_name, tools_config):
         return None
 
 def get_openai_response(messages, model_name, use_revise_answer=False):
-    """
-    Gets a response from the OpenAI API with caching.
-    Prevents searches during revision phase.
-    """
-    # Initialize response cache if not exists
-    if "response_cache" not in st.session_state:
-        st.session_state.response_cache = {}
-        
-    # Define base prompt
-    prompt = f"""You are a helpful AI assistant. You have access to the following tools:
-    - tavily_search_results_json: Web search using either Brave Search (default) or Tavily with automatic fallback. Only use this for questions requiring current or factual information.
-    - AnswerQuestion: Provides an answer to the question.
-    - ReviseAnswer: Revises the original answer to the question.
-    
-    IMPORTANT SEARCH GUIDELINES:
-    1. Only use search for questions requiring current information, facts, statistics, or specific data.
-    2. Avoid searching for general knowledge, concepts, or how-to explanations.
-    3. When searching, use specific and focused queries (max 3) rather than broad ones.
-    4. Reuse previous search results when possible instead of making new searches.
-    
-    After using any tool, synthesize the information into a complete and user-friendly answer using the AnswerQuestion or ReviseAnswer tool. When performing calculations, present each step clearly using LaTeX formatting. Always enclose ONLY the mathematical expressions in \(...\) to ensure proper rendering. Do not include any surrounding text within the \(...\) environment. For example:
-    "Perform the multiplication: \( 15 \times 3.2 = 48 \)."
-    "Perform the division: \( \frac{100}{4} = 25 \)."
-    "Add the results: \( 48 + 25 = 73 \)."
-    The final result is 73. It is crucial to always use the \(...\) format for ONLY the mathematical expressions.
-    """
-    
-    # Add revision-specific instructions if in revision mode
+    cache_key = f"{str(messages)}_{model_name}_{use_revise_answer}"
+
     if use_revise_answer:
-        prompt += "\nYou are in revision mode. Focus on improving the existing answer without making new searches."
-    
-    messages = [{"role": "system", "content": prompt}] + messages
+        # Invalidate cache for revised answers
+        st.session_state.response_cache.pop(cache_key, None)
 
-    # Define base tools (always available)
-    tools = [
-        {
-            "type": "function",
-            "function": {
-                "name": "AnswerQuestion" if not use_revise_answer else "ReviseAnswer",
-                "description": "Answer the question. Provide an answer and reflection.",
-                "parameters": (ReviseAnswer if use_revise_answer else AnswerQuestion).model_json_schema(),
-            }
-        }
-    ]
-    
-    if not use_revise_answer:
-        tools.append({
-            "type": "function",
-            "function": {
-                "name": "ReviseAnswer",
-                "description": "Refine and improve the response with additional details if needed.",
-                "parameters": ReviseAnswer.model_json_schema(),
-            }
-        })
-    
-    # Only include search tool if not in revision phase
-    if not use_revise_answer:
-        search_tool_name = "brave_search_results_json" if st.session_state.get("search_provider", "brave") == "brave" else "tavily_search_results_json"
-
-        tools.append({
-            "type": "function",
-            "function": {
-                "name": search_tool_name,
-                "description": "Web search using the selected provider.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "The search query to use."
-                        }
-                    },
-                    "required": ["query"]
-                }
-            }
-        })
-        
-        # Removed duplicate registration of tavily_search_results_json
-
-    # Convert messages to string for caching
-    messages_str = str(messages)
-    cache_key = f"{messages_str}_{model_name}_{use_revise_answer}"
-
-    # Check if we have a cached response
     if cache_key in st.session_state.response_cache:
         logging.info("Using cached OpenAI response")
         return st.session_state.response_cache[cache_key]
 
-    # If not in cache, get new response
-    try:
-        response = get_cached_openai_response(messages_str, model_name, tools)
-        if response is None:
-            logging.error("OpenAI API response is None")
-            return None
-            
-        # Cache the response
+    response = get_cached_openai_response(str(messages), model_name, tools)
+    if response:
         st.session_state.response_cache[cache_key] = response
         logging.info("Cached new OpenAI response")
-        return response
-    except (OpenAIError, Exception) as e:
-        st.error(f"OpenAI API Error: {str(e)}")
-        return None
+    return response
 
 def validate_response(response_content):
     """Validates the response content against task-specific criteria."""
@@ -324,33 +237,35 @@ def validate_response(response_content):
 def needs_search(question: str) -> bool:
     """Determines if a question requires web search based on its content."""
     no_search_patterns = [
-        r"^how (do|does|can|would|should)",  # How-to questions
-        r"^what (is|are) the difference",     # Definition/comparison questions
-        r"^explain",                          # Explanatory questions
-        r"^describe",                         # Descriptive questions
-        r"^calculate",                        # Mathematical questions
-        r"\d[\+\-\*\/\=]",                   # Mathematical expressions
+        r"^how (do|does|can|would|should)",
+        r"^what (is|are) the difference",
+        r"^explain",
+        r"^describe",
+        r"^calculate",
+        r"\d[\+\-\*\/\=]",
+        r"(who|what|where|when) is",
+        r"define .*"
     ]
-    
+
     search_patterns = [
-        r"latest|recent|current|new|update",  # Time-sensitive information
-        r"(in|for|during) \d{4}",            # Specific year references
-        r"statistics|data|numbers",           # Data-driven questions
-        r"price|cost|market",                # Market-related information
-        r"news|event",                       # Current events
+        r"(latest|recent|current|new|update)",
+        r"(in|for|during) \d{4}",
+        r"statistics|data|numbers",
+        r"price|cost|market",
+        r"news|event",
+        r"breaking news",
+        r"confirmed reports"
     ]
-    
-    for pattern in no_search_patterns:
-        if re.search(pattern, question.lower()):
-            logging.info(f"Question matches no-search pattern: {pattern}")
-            return False
-            
-    for pattern in search_patterns:
-        if re.search(pattern, question.lower()):
-            logging.info(f"Question matches search pattern: {pattern}")
-            return True
-            
-    return True
+
+    if any(re.search(pattern, question.lower()) for pattern in no_search_patterns):
+        logging.info("Skipping search for general knowledge question.")
+        return False
+
+    if any(re.search(pattern, question.lower()) for pattern in search_patterns):
+        logging.info("Web search is needed for this query.")
+        return True
+
+    return False
 
 def process_response(response, user_question, model_choice, status_placeholder):
     """Process the response and handle search queries efficiently."""
@@ -383,7 +298,7 @@ def process_response(response, user_question, model_choice, status_placeholder):
         logging.info(f"Cleared expired cache entry for query: {query}")
 
     while iteration < max_iterations:
-        if assistant_text:
+        if assistant_text and "Unknown function" not in assistant_text:
             break  # Exit early if a valid response is obtained
         if iteration >= 3 and "No relevant search results found" in assistant_text:
             st.error("No valid data was found. Try a different query.")
@@ -405,13 +320,13 @@ def process_response(response, user_question, model_choice, status_placeholder):
                     if function_name == "AnswerQuestion":
                         answer_data = AnswerQuestion.model_validate_json(function_args)
                         assistant_text = answer_data.answer
-                        reflection = answer_data.reflection.dict() if hasattr(answer_data, "reflection") else {"missing": "No reflection provided.", "superfluous": "No reflection provided."}
+                        reflection = answer_data.reflection.model_dump() if hasattr(answer_data, "reflection") else {"missing": "No reflection provided.", "superfluous": "No reflection provided."}
                         st.session_state["reflections"].append(reflection)
 
                     elif function_name == "ReviseAnswer":
                         answer_data = ReviseAnswer.model_validate_json(function_args)
                         assistant_text = answer_data.answer
-                        reflection = answer_data.reflection.dict()
+                        reflection = answer_data.reflection.model_dump()
                         st.session_state["reflections"].append(reflection)
                     search_tool_name = (st.session_state.get("search_provider") or "brave") + "_search_results_json"
                     if function_name != search_tool_name:
@@ -419,7 +334,14 @@ def process_response(response, user_question, model_choice, status_placeholder):
                         continue  # Skip the incorrect search function
                     elif function_name == search_tool_name and not use_revise_answer:
                         try:
-                            query = json.loads(function_args)['query']
+                            try:
+                                if function_args and isinstance(function_args, str):
+                                    function_args = json.loads(function_args)  # Ensure it's parsed correctly
+                                query = function_args.get("query", "")
+                            except json.JSONDecodeError:
+                                assistant_text += f"\n\nError: Failed to parse JSON arguments for {function_name}."
+                                logging.error(f"JSON parsing error in {function_name}: {function_args}")
+                                continue
                         except Exception as e:
                             assistant_text += f"\n\nError processing tool call: {function_name} - {str(e)}"
                             logging.error(f"Error processing tool call: {function_name} - {str(e)}")
