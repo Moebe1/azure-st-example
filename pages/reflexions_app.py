@@ -354,7 +354,8 @@ def main():
         st.session_state["messages"] = [
             {"role": "assistant", "content": "Hello! How can I assist you today?"}
         ]
-        st.session_state["reflections"] = []
+
+    st.session_state["reflections"] = []
 
     with st.sidebar:
         st.header("Configuration")
@@ -377,37 +378,38 @@ def main():
             with st.chat_message("user"):
                 st.write(prompt)
 
-        with st.chat_message("assistant"):
-            message_placeholder = st.empty()
-            status_placeholder = st.empty() # For ephemeral status updates
+    with st.chat_message("assistant"):
+        message_placeholder = st.empty()
+        status_placeholder = st.empty() # For ephemeral status updates
+        assistant_text = ""
+
+    # Initial response
+    with st.spinner("Thinking..."):
+        if prompt and prompt.strip():
+            messages = st.session_state["messages"]
+            status_placeholder.text("Generating response...")
+            logging.info("Calling get_openai_response") # ADDED LOGGING
+            response = get_openai_response(messages, model_choice)
+            logging.info("Returned from get_openai_response, calling process_response") # ADDED LOGGING
+            assistant_text = process_response(response, prompt, model_choice, status_placeholder)
+        else:
             assistant_text = ""
 
-            # Initial response
-            with st.spinner("Thinking..."):
-                if prompt and prompt.strip():
-                    messages = st.session_state["messages"]
-                    status_placeholder.text("Generating response...")
-                    logging.info("Calling get_openai_response") # ADDED LOGGING
-                    response = get_openai_response(messages, model_choice)
-                    logging.info("Returned from get_openai_response, calling process_response") # ADDED LOGGING
-                    assistant_text = process_response(response, prompt, model_choice, status_placeholder)
-                else:
-                    assistant_text = ""
+        st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
+        if assistant_text:
+            message_placeholder.markdown(assistant_text)
+            status_placeholder.empty() # Clear the status message
 
-                st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
-                if assistant_text:
-                    message_placeholder.markdown(assistant_text)
-                    status_placeholder.empty() # Clear the status message
 
-        # Display reflections in an expander, outside the chat message
-        if len(st.session_state["reflections"]) > 0:
-            with st.expander("Reflections"):
-                reflections_output = ""
-                for i, r in enumerate(st.session_state["reflections"], start=1):
-                    reflections_output += f"**Reflection {i}:**  \n- Missing: {r.get('missing','')}  \n- Superfluous: {r.get('superfluous','')}  \n---  \n"
-                # Add reflections to the chat with markdown
-                st.markdown(reflections_output)
-                logging.info(f"Reflections Output: {reflections_output}") # ADDED LOGGING
+    # Display reflections in an expander, outside the chat message
+    if len(st.session_state["reflections"]) > 0:
+        with st.expander("Reflections"):
+            reflections_output = ""
+            for i, r in enumerate(st.session_state["reflections"], start=1):
+                reflections_output += f"**Reflection {i}:**  \n- Missing: {r.get('missing','')}  \n- Superfluous: {r.get('superfluous','')}  \n---  \n"
+            # Add reflections to the chat with markdown
+            st.markdown(reflections_output)
+            logging.info(f"Reflections Output: {reflections_output}") # ADDED LOGGING
 
     # Reflection and revision (restored from reference)
     st.markdown("### Reflections")
