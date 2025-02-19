@@ -310,9 +310,12 @@ def main():
 
             # Initial response
             with st.spinner("Thinking..."):
-                messages = st.session_state["messages"]
-                response = get_openai_response(messages, model_choice)
-                assistant_text = process_response(response, prompt, model_choice)
+                if prompt and prompt.strip():
+                    messages = st.session_state["messages"]
+                    response = get_openai_response(messages, model_choice)
+                    assistant_text = process_response(response, prompt, model_choice)
+                else:
+                    assistant_text = ""
 
                 st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
                 if assistant_text:
