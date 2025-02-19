@@ -328,6 +328,7 @@ def main():
                         reflections_output += f"**Reflection {i}:**  \n- Missing: {r.get('missing','')}  \n- Superfluous: {r.get('superfluous','')}  \n---  \n"
                     # Add reflections to the chat with markdown
                     message_placeholder.markdown("#### Reflections\n" + reflections_output)
+                    logging.info(f"Reflections Output: {reflections_output}") # ADDED LOGGING
 
     # Reflection and revision (restored from reference)
     st.markdown("### Reflections")
