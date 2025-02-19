@@ -1,0 +1,610 @@
+st.write_stream
+Streamlit Version
+Version 1.42.0
+Stream a generator, iterable, or stream-like sequence to the app.
+
+st.write_stream iterates through the given sequences and writes all chunks to the app. String chunks will be written using a typewriter effect. Other data types will be written using st.write.
+
+Function signature[source]
+st.write_stream(stream)
+
+Parameters
+stream (Callable, Generator, Iterable, OpenAI Stream, or LangChain Stream)
+
+The generator or iterable to stream.
+
+If you pass an async generator, Streamlit will internally convert it to a sync generator.
+
+Note
+
+To use additional LLM libraries, you can create a wrapper to manually define a generator function and include custom output parsing.
+
+Returns
+(str or list)
+
+The full response. If the streamed output only contains text, this is a string. Otherwise, this is a list of all the streamed objects. The return value is fully compatible as input for st.write.
+
+Example
+You can pass an OpenAI stream as shown in our tutorial, Build a basic LLM chat app. Alternatively, you can pass a generic generator function as input:
+
+import time
+import numpy as np
+import pandas as pd
+import streamlit as st
+
+_LOREM_IPSUM = """
+Lorem ipsum dolor sit amet, **consectetur adipiscing** elit, sed do eiusmod tempor
+incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis
+nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.
+"""
+
+
+def stream_data():
+    for word in _LOREM_IPSUM.split(" "):
+        yield word + " "
+        time.sleep(0.02)
+
+    yield pd.DataFrame(
+        np.random.randn(5, 10),
+        columns=["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"],
+    )
+
+    for word in _LOREM_IPSUM.split(" "):
+        yield word + " "
+        time.sleep(0.02)
+
+
+if st.button("Stream data"):
+    st.write_stream(stream_data)
+Copy
+
+Built with Streamlit 🎈
+Fullscreen
+open_in_new
+star
+Tip
+If your stream object is not compatible with st.write_stream, define a wrapper around your stream object to create a compatible generator function.
+
+for chunk in unsupported_stream:
+    yield preprocess(chunk)
+
+st.write
+Streamlit Version
+Version 1.42.0
+Displays arguments in the app.
+
+This is the Swiss Army knife of Streamlit commands: it does different things depending on what you throw at it. Unlike other Streamlit commands, st.write() has some unique properties:
+
+You can pass in multiple arguments, all of which will be displayed.
+Its behavior depends on the input type(s).
+Function signature[source]
+st.write(*args, unsafe_allow_html=False, **kwargs)
+
+Parameters
+*args (any)
+
+One or many objects to display in the app.
+
+Each type of argument is handled as follows:
+Type	Handling
+str	Uses st.markdown().
+dataframe-like, dict, or list	Uses st.dataframe().
+Exception	Uses st.exception().
+function, module, or class	Uses st.help().
+DeltaGenerator	Uses st.help().
+Altair chart	Uses st.altair_chart().
+Bokeh figure	Uses st.bokeh_chart().
+Graphviz graph	Uses st.graphviz_chart().
+Keras model	Converts model and uses st.graphviz_chart().
+Matplotlib figure	Uses st.pyplot().
+Plotly figure	Uses st.plotly_chart().
+PIL.Image	Uses st.image().
+generator or stream (like openai.Stream)	Uses st.write_stream().
+SymPy expression	Uses st.latex().
+An object with ._repr_html()	Uses st.html().
+Database cursor	Displays DB API 2.0 cursor results in a table.
+Any	Displays str(arg) as inline code.
+unsafe_allow_html (bool)
+
+Whether to render HTML within *args. This only applies to strings or objects falling back on _repr_html_(). If this is False (default), any HTML tags found in body will be escaped and therefore treated as raw text. If this is True, any HTML expressions within body will be rendered.
+
+Adding custom HTML to your app impacts safety, styling, and maintainability.
+
+Note
+
+If you only want to insert HTML or CSS without Markdown text, we recommend using st.html instead.
+
+**kwargs (any)
+
+delete
+**kwargs is deprecated and will be removed in a later version. Use other, more specific Streamlit commands to pass additional keyword arguments.
+
+Keyword arguments. Not used.
+
+Returns
+(None)
+
+No description
+
+Examples
+Its basic use case is to draw Markdown-formatted text, whenever the input is a string:
+
+import streamlit as st
+
+st.write("Hello, *World!* :sunglasses:")
+Copy
+
+Built with Streamlit 🎈
+Fullscreen
+open_in_new
+As mentioned earlier, st.write() also accepts other data formats, such as numbers, data frames, styled data frames, and assorted objects:
+
+import streamlit as st
+import pandas as pd
+
+st.write(1234)
+st.write(
+    pd.DataFrame(
+        {
+            "first column": [1, 2, 3, 4],
+            "second column": [10, 20, 30, 40],
+        }
+    )
+)
+Copy
+
+Built with Streamlit 🎈
+Fullscreen
+open_in_new
+Finally, you can pass in multiple arguments to do things like:
+
+import streamlit as st
+
+st.write("1 + 1 = ", 2)
+st.write("Below is a DataFrame:", data_frame, "Above is a dataframe.")
+Copy
+
+Built with Streamlit 🎈
+Fullscreen
+open_in_new
+Oh, one more thing: st.write accepts chart objects too! For example:
+
+import streamlit as st
+import pandas as pd
+import numpy as np
+import altair as alt
+
+df = pd.DataFrame(np.random.randn(200, 3), columns=["a", "b", "c"])
+c = (
+    alt.Chart(df)
+    .mark_circle()
+    .encode(x="a", y="b", size="c", color="c", tooltip=["a", "b", "c"])
+)
+
+st.write(c)
+
+st.latex
+Streamlit Version
+Version 1.42.0
+Display mathematical expressions formatted as LaTeX.
+
+Supported LaTeX functions are listed at https://katex.org/docs/supported.html.
+
+Function signature[source]
+st.latex(body, *, help=None)
+
+Parameters
+body (str or SymPy expression)
+
+The string or SymPy expression to display as LaTeX. If str, it's a good idea to use raw Python strings since LaTeX uses backslashes a lot.
+
+help (str or None)
+
+A tooltip that gets displayed next to the LaTeX expression. If this is None (default), no tooltip is displayed.
+
+The tooltip can optionally contain GitHub-flavored Markdown, including the Markdown directives described in the body parameter of st.markdown.
+
+Example
+import streamlit as st
+
+st.latex(r'''
+    a + ar + a r^2 + a r^3 + \cdots + a r^{n-1} =
+    \sum_{k=0}^{n-1} ar^k =
+    a \left(\frac{1-r^{n}}{1-r}\right)
+    ''')
+
+st.markdown
+Streamlit Version
+Version 1.42.0
+Display string formatted as Markdown.
+
+Function signature[source]
+st.markdown(body, unsafe_allow_html=False, *, help=None)
+
+Parameters
+body (any)
+
+The text to display as GitHub-flavored Markdown. Syntax information can be found at: https://github.github.com/gfm. If anything other than a string is passed, it will be converted into a string behind the scenes using str(body).
+
+This also supports:
+
+Emoji shortcodes, such as :+1: and :sunglasses:. For a list of all supported codes, see https://share.streamlit.io/streamlit/emoji-shortcodes.
+Streamlit logo shortcode. Use :streamlit: to add a little Streamlit flair to your text.
+A limited set of typographical symbols. "<- -> <-> -- >= <= ~=" becomes "← → ↔ — ≥ ≤ ≈" when parsed as Markdown.
+Google Material Symbols (rounded style), using the syntax :material/icon_name:, where "icon_name" is the name of the icon in snake case. For a complete list of icons, see Google's Material Symbols font library.
+LaTeX expressions, by wrapping them in "$" or "$$" (the "$$" must be on their own lines). Supported LaTeX functions are listed at https://katex.org/docs/supported.html.
+Colored text and background colors for text, using the syntax :color[text to be colored] and :color-background[text to be colored], respectively. color must be replaced with any of the following supported colors: blue, green, orange, red, violet, gray/grey, rainbow, or primary. For example, you can use :orange[your text here] or :blue-background[your text here]. If you use "primary" for color, Streamlit will use the default primary accent color unless you set the theme.primaryColor configuration option.
+unsafe_allow_html (bool)
+
+Whether to render HTML within body. If this is False (default), any HTML tags found in body will be escaped and therefore treated as raw text. If this is True, any HTML expressions within body will be rendered.
+
+Adding custom HTML to your app impacts safety, styling, and maintainability.
+
+Note
+
+If you only want to insert HTML or CSS without Markdown text, we recommend using st.html instead.
+
+help (str or None)
+
+A tooltip that gets displayed next to the Markdown. If this is None (default), no tooltip is displayed.
+
+The tooltip can optionally contain GitHub-flavored Markdown, including the Markdown directives described in the body parameter of st.markdown.
+
+Examples
+import streamlit as st
+
+st.markdown("*Streamlit* is **really** ***cool***.")
+st.markdown('''
+    :red[Streamlit] :orange[can] :green[write] :blue[text] :violet[in]
+    :gray[pretty] :rainbow[colors] and :blue-background[highlight] text.''')
+st.markdown("Here's a bouquet &mdash;\
+            :tulip::cherry_blossom::rose::hibiscus::sunflower::blossom:")
+
+multi = '''If you end a line with two spaces,
+a soft return is used for the next line.
+
+Two (or more) newline characters in a row will result in a hard return.
+'''
+st.markdown(multi)
+
+st.status
+Streamlit Version
+Version 1.42.0
+Insert a status container to display output from long-running tasks.
+
+Inserts a container into your app that is typically used to show the status and details of a process or task. The container can hold multiple elements and can be expanded or collapsed by the user similar to st.expander. When collapsed, all that is visible is the status icon and label.
+
+The label, state, and expanded state can all be updated by calling .update() on the returned object. To add elements to the returned container, you can use with notation (preferred) or just call methods directly on the returned object.
+
+By default, st.status() initializes in the "running" state. When called using with notation, it automatically updates to the "complete" state at the end of the "with" block. See examples below for more details.
+
+Function signature[source]
+st.status(label, *, expanded=False, state="running")
+
+Parameters
+label (str)
+
+The initial label of the status container. The label can optionally contain GitHub-flavored Markdown of the following types: Bold, Italics, Strikethroughs, Inline Code, Links, and Images. Images display like icons, with a max height equal to the font height.
+
+Unsupported Markdown elements are unwrapped so only their children (text contents) render. Display unsupported elements as literal characters by backslash-escaping them. E.g., "1\. Not an ordered list".
+
+See the body parameter of st.markdown for additional, supported Markdown directives.
+
+expanded (bool)
+
+If True, initializes the status container in "expanded" state. Defaults to False (collapsed).
+
+state ("running", "complete", or "error")
+
+The initial state of the status container which determines which icon is shown:
+
+running (default): A spinner icon is shown.
+complete: A checkmark icon is shown.
+error: An error icon is shown.
+Returns
+(StatusContainer)
+
+A mutable status container that can hold multiple elements. The label, state, and expanded state can be updated after creation via .update().
+
+Examples
+You can use the with notation to insert any element into an status container:
+
+import time
+import streamlit as st
+
+with st.status("Downloading data..."):
+    st.write("Searching for data...")
+    time.sleep(2)
+    st.write("Found URL.")
+    time.sleep(1)
+    st.write("Downloading data...")
+    time.sleep(1)
+
+st.button("Rerun")
+Copy
+
+Built with Streamlit 🎈
+Fullscreen
+open_in_new
+You can also use .update() on the container to change the label, state, or expanded state:
+
+import time
+import streamlit as st
+
+with st.status("Downloading data...", expanded=True) as status:
+    st.write("Searching for data...")
+    time.sleep(2)
+    st.write("Found URL.")
+    time.sleep(1)
+    st.write("Downloading data...")
+    time.sleep(1)
+    status.update(
+        label="Download complete!", state="complete", expanded=False
+    )
+
+st.button("Rerun")
+Copy
+
+Built with Streamlit 🎈
+Fullscreen
+open_in_new
+StatusContainer.update
+Streamlit Version
+Version 1.42.0
+Update the status container.
+
+Only specified arguments are updated. Container contents and unspecified arguments remain unchanged.
+
+Function signature[source]
+StatusContainer.update(*, label=None, expanded=None, state=None)
+
+Parameters
+label (str or None)
+
+A new label of the status container. If None, the label is not changed.
+
+expanded (bool or None)
+
+The new expanded state of the status container. If None, the expanded state is not changed.
+
+state ("running", "complete", "error", or None)
+
+The new state of the status container. This mainly changes the icon. If None, the state is not changed.
+
+st.cache_resource
+Streamlit Version
+Version 1.42.0
+Decorator to cache functions that return global resources (e.g. database connections, ML models).
+
+Cached objects are shared across all users, sessions, and reruns. They must be thread-safe because they can be accessed from multiple threads concurrently. If thread safety is an issue, consider using st.session_state to store resources per session instead.
+
+You can clear a function's cache with func.clear() or clear the entire cache with st.cache_resource.clear().
+
+A function's arguments must be hashable to cache it. If you have an unhashable argument (like a database connection) or an argument you want to exclude from caching, use an underscore prefix in the argument name. In this case, Streamlit will return a cached value when all other arguments match a previous function call. Alternatively, you can declare custom hashing functions with hash_funcs.
+
+To cache data, use st.cache_data instead. Learn more about caching at https://docs.streamlit.io/develop/concepts/architecture/caching.
+
+Function signature[source]
+st.cache_resource(func, *, ttl, max_entries, show_spinner, validate, experimental_allow_widgets, hash_funcs=None)
+
+Parameters
+func (callable)
+
+The function that creates the cached resource. Streamlit hashes the function's source code.
+
+ttl (float, timedelta, str, or None)
+
+The maximum time to keep an entry in the cache. Can be one of:
+
+None if cache entries should never expire (default).
+A number specifying the time in seconds.
+A string specifying the time in a format supported by Pandas's Timedelta constructor, e.g. "1d", "1.5 days", or "1h23s".
+A timedelta object from Python's built-in datetime library, e.g. timedelta(days=1).
+max_entries (int or None)
+
+The maximum number of entries to keep in the cache, or None for an unbounded cache. When a new entry is added to a full cache, the oldest cached entry will be removed. Defaults to None.
+
+show_spinner (bool or str)
+
+Enable the spinner. Default is True to show a spinner when there is a "cache miss" and the cached resource is being created. If string, value of show_spinner param will be used for spinner text.
+
+validate (callable or None)
+
+An optional validation function for cached data. validate is called each time the cached value is accessed. It receives the cached value as its only parameter and it must return a boolean. If validate returns False, the current cached value is discarded, and the decorated function is called to compute a new value. This is useful e.g. to check the health of database connections.
+
+experimental_allow_widgets (bool)
+
+delete
+The cached widget replay functionality was removed in 1.38. Please remove the experimental_allow_widgets parameter from your caching decorators. This parameter will be removed in a future version.
+
+Allow widgets to be used in the cached function. Defaults to False.
+
+hash_funcs (dict or None)
+
+Mapping of types or fully qualified names to hash functions. This is used to override the behavior of the hasher inside Streamlit's caching mechanism: when the hasher encounters an object, it will first check to see if its type matches a key in this dict and, if so, will use the provided function to generate a hash for it. See below for an example of how this can be used.
+
+Example
+import streamlit as st
+
+@st.cache_resource
+def get_database_session(url):
+    # Create a database session object that points to the URL.
+    return session
+
+s1 = get_database_session(SESSION_URL_1)
+# Actually executes the function, since this is the first time it was
+# encountered.
+
+s2 = get_database_session(SESSION_URL_1)
+# Does not execute the function. Instead, returns its previously computed
+# value. This means that now the connection object in s1 is the same as in s2.
+
+s3 = get_database_session(SESSION_URL_2)
+# This is a different URL, so the function executes.
+Copy
+By default, all parameters to a cache_resource function must be hashable. Any parameter whose name begins with _ will not be hashed. You can use this as an "escape hatch" for parameters that are not hashable:
+
+import streamlit as st
+
+@st.cache_resource
+def get_database_session(_sessionmaker, url):
+    # Create a database connection object that points to the URL.
+    return connection
+
+s1 = get_database_session(create_sessionmaker(), DATA_URL_1)
+# Actually executes the function, since this is the first time it was
+# encountered.
+
+s2 = get_database_session(create_sessionmaker(), DATA_URL_1)
+# Does not execute the function. Instead, returns its previously computed
+# value - even though the _sessionmaker parameter was different
+# in both calls.
+Copy
+A cache_resource function's cache can be procedurally cleared:
+
+import streamlit as st
+
+@st.cache_resource
+def get_database_session(_sessionmaker, url):
+    # Create a database connection object that points to the URL.
+    return connection
+
+fetch_and_clean_data.clear(_sessionmaker, "https://streamlit.io/")
+# Clear the cached entry for the arguments provided.
+
+get_database_session.clear()
+# Clear all cached entries for this function.
+Copy
+To override the default hashing behavior, pass a custom hash function. You can do that by mapping a type (e.g. Person) to a hash function (str) like this:
+
+import streamlit as st
+from pydantic import BaseModel
+
+class Person(BaseModel):
+    name: str
+
+@st.cache_resource(hash_funcs={Person: str})
+def get_person_name(person: Person):
+    return person.name
+Copy
+Alternatively, you can map the type's fully-qualified name (e.g. "__main__.Person") to the hash function instead:
+
+import streamlit as st
+from pydantic import BaseModel
+
+class Person(BaseModel):
+    name: str
+
+@st.cache_resource(hash_funcs={"__main__.Person": str})
+def get_person_name(person: Person):
+    return person.name
+Copy
+st.cache_resource.clear
+Streamlit Version
+Version 1.42.0
+Clear all cache_resource caches.
+
+Function signature[source]
+st.cache_resource.clear()
+
+Example
+In the example below, pressing the "Clear All" button will clear all cache_resource caches. i.e. Clears cached global resources from all functions decorated with @st.cache_resource.
+
+import streamlit as st
+from transformers import BertModel
+
+@st.cache_resource
+ def get_database_session(url):
+     # Create a database session object that points to the URL.
+     return session
+
+@st.cache_resource
+def get_model(model_type):
+    # Create a model of the specified type.
+    return BertModel.from_pretrained(model_type)
+
+if st.button("Clear All"):
+    # Clears all st.cache_resource caches:
+    st.cache_resource.clear()
+CachedFunc.clear
+Streamlit Version
+Version 1.42.0
+Clear the cached function's associated cache.
+
+If no arguments are passed, Streamlit will clear all values cached for the function. If arguments are passed, Streamlit will clear the cached value for these arguments only.
+
+Function signature[source]
+CachedFunc.clear(*args, **kwargs)
+
+Parameters
+*args (Any)
+
+Arguments of the cached functions.
+
+**kwargs (Any)
+
+Keyword arguments of the cached function.
+
+Example
+import streamlit as st
+import time
+
+@st.cache_data
+def foo(bar):
+    time.sleep(2)
+    st.write(f"Executed foo({bar}).")
+    return bar
+
+if st.button("Clear all cached values for `foo`", on_click=foo.clear):
+    foo.clear()
+
+if st.button("Clear the cached value of `foo(1)`"):
+    foo.clear(1)
+
+foo(1)
+foo(2)
+Copy
+Using Streamlit commands in cached functions
+Static elements
+Since version 1.16.0, cached functions can contain Streamlit commands! For example, you can do this:
+
+from transformers import pipeline
+
+@st.cache_resource
+def load_model():
+    model = pipeline("sentiment-analysis")
+    st.success("Loaded NLP model from Hugging Face!")  # 👈 Show a success message
+    return model
+As we know, Streamlit only runs this function if it hasn’t been cached before. On this first run, the st.success message will appear in the app. But what happens on subsequent runs? It still shows up! Streamlit realizes that there is an st. command inside the cached function, saves it during the first run, and replays it on subsequent runs. Replaying static elements works for both caching decorators.
+
+You can also use this functionality to cache entire parts of your UI:
+
+@st.cache_resource
+def load_model():
+    st.header("Data analysis")
+    model = torchvision.models.resnet50(weights=ResNet50_Weights.DEFAULT)
+    st.success("Loaded model!")
+    st.write("Turning on evaluation mode...")
+    model.eval()
+    st.write("Here's the model:")
+    return model
+Input widgets
+You can also use interactive input widgets like st.slider or st.text_input in cached functions. Widget replay is an experimental feature at the moment. To enable it, you need to set the experimental_allow_widgets parameter:
+
+@st.cache_resource(experimental_allow_widgets=True)  # 👈 Set the parameter
+def load_model():
+    pretrained = st.checkbox("Use pre-trained model:")  # 👈 Add a checkbox
+    model = torchvision.models.resnet50(weights=ResNet50_Weights.DEFAULT, pretrained=pretrained)
+    return model
+Streamlit treats the checkbox like an additional input parameter to the cached function. If you uncheck it, Streamlit will see if it has already cached the function for this checkbox state. If yes, it will return the cached value. If not, it will rerun the function using the new slider value.
+
+Using widgets in cached functions is extremely powerful because it lets you cache entire parts of your app. But it can be dangerous! Since Streamlit treats the widget value as an additional input parameter, it can easily lead to excessive memory usage. Imagine your cached function has five sliders and returns a 100 MB DataFrame. Then we’ll add 100 MB to the cache for every permutation of these five slider values – even if the sliders do not influence the returned data! These additions can make your cache explode very quickly. Please be aware of this limitation if you use widgets in cached functions. We recommend using this feature only for isolated parts of your UI where the widgets directly influence the cached return value.
+
+priority_high
+Warning
+Support for widgets in cached functions is currently experimental. We may change or remove it anytime without warning. Please use it with care!
+
+push_pin
+Note
+Two widgets are currently not supported in cached functions: st.file_uploader and st.camera_input. We may support them in the future. Feel free to open a GitHub issue if you need them!
+
