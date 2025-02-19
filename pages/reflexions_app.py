@@ -255,6 +255,25 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
                 }
             }
         })
+        search_tool_name = "brave_search_results_json" if st.session_state.search_provider == "brave" else "tavily_search_results_json"
+
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": search_tool_name,
+                "description": "Web search using the selected provider.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The search query to use."
+                        }
+                    },
+                    "required": ["query"]
+                }
+            }
+        })
 
     # Convert messages to string for caching
     messages_str = str(messages)
@@ -392,13 +411,7 @@ def process_response(response, user_question, model_choice, status_placeholder):
                         reflection = answer_data.reflection.dict()
                         st.session_state["reflections"].append(reflection)
                         
-                    elif function_name == "tavily_search_results_json" and not use_revise_answer:
-                        try:
-                            query = eval(function_args)['query']
-                        except Exception as e:
-                            assistant_text += f"\n\nError processing tool call: {function_name} - {str(e)}"
-                            logging.error(f"Error processing tool call: {function_name} - {str(e)}")
-                    elif function_name == "brave_search_results_json" and not use_revise_answer:
+                    elif function_name == st.session_state.search_provider + "_search_results_json" and not use_revise_answer:
                         try:
                             query = eval(function_args)['query']
                         except Exception as e:
