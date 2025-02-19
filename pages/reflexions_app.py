@@ -315,7 +315,16 @@ def main():
                 assistant_text = process_response(response, prompt, model_choice)
 
                 st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
-                message_placeholder.markdown(assistant_text)
+                if assistant_text:
+                    message_placeholder.markdown(assistant_text)
+
+                # Display reflections directly in the chat message
+                if len(st.session_state["reflections"]) > 0:
+                    reflections_output = ""
+                    for i, r in enumerate(st.session_state["reflections"], start=1):
+                        reflections_output += f"**Reflection {i}:**  \n- Missing: {r.get('missing','')}  \n- Superfluous: {r.get('superfluous','')}  \n---  \n"
+                    # Add reflections to the chat with markdown
+                    message_placeholder.markdown("#### Reflections\n" + reflections_output)
 
     # Reflection and revision (restored from reference)
     st.markdown("### Reflections")
