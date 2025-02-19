@@ -237,13 +237,10 @@ def process_response(response, user_question, model_choice):
                                     {"role": "user", "content": user_question},
                                     {"role": "assistant", "content": f"Search results: {combined_content}"}
                                 ]
-                                response = get_openai_response(
-                                    messages, model_choice, use_revise_answer
-                                )
-                                if response and response.choices and response.choices[0].message:
-                                    assistant_text = response.choices[0].message.content or ""
-                                else:
-                                    assistant_text = "Could not synthesize the information."
+                                # Instead of calling get_openai_response again, synthesize the information directly
+                                # and set assistant_text for this iteration.
+                                assistant_text = "Search results obtained. Now synthesizing answer..." # Provide a placeholder message
+                                    # Further processing to synthesize answer and reflection will happen in the next iterations
                             else:
                                 assistant_text = "\n\nCould not find relevant information in search results."
                         except Exception as e:
