@@ -157,7 +157,7 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
             tools=tools,
             tool_choice="auto"
         )
-        logging.info(f"Raw OpenAI API Response: {{response}}") # ADDED LOGGING
+        logging.info(f"Raw OpenAI API Response: {response.model_dump_json()}") # FIXED LOGGING: Use model_dump_json()
         if response is None: # ADDED LOGGING
             logging.error("OpenAI API response is None") # ADDED LOGGING
             return None # ADDED LOGGING
@@ -284,7 +284,7 @@ def process_response(response, user_question, model_choice):
     if iteration == max_iterations:
         logging.warning("Maximum iterations reached.")
 
-    logging.info(f"Assistant Text before return: {{assistant_text}}") # ADDED LOGGING
+    logging.info(f"Assistant Text before return: {assistant_text}") # FIXED LOGGING
     return assistant_text
 
 # =============================================================================
