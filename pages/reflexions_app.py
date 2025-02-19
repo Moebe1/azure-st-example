@@ -297,7 +297,7 @@ def main():
             st.write(msg["content"])
 
     # After rendering all messages, create a single chat input
-    with st.expander("Send a message", expanded=True, key="chat_input_expander"):
+    with st.expander("Send a message", expanded=True):
         prompt = st.chat_input("Type your message here...", key="main_chat_input")
         if prompt:
             st.session_state["messages"].append({"role": "user", "content": prompt})
