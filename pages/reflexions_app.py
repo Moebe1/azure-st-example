@@ -367,7 +367,7 @@ def process_response(response, user_question, model_choice, status_placeholder):
                     if function_name != search_tool_name:
                         logging.warning(f"Ignoring search call to {function_name}, using {search_tool_name} instead.")
                         continue  # Skip the incorrect search function
-                    elif function_name == search_tool_name and not use_revise_answer:
+                    elif function_name == search_tool_name:
                         try:
                             try:
                                 if function_args and isinstance(function_args, str):
