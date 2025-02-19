@@ -205,16 +205,17 @@ def process_response(response, user_question, model_choice):
     while iteration < max_iterations:
         if response and response.choices and response.choices[0].message:
             message = response.choices[0].message
-            tool_calls = message.tool_calls
+            tool_calls = message.tool_calls or [] # Handle case with no tool_calls
             logging.info(f"LLM Response Content (Iteration {iteration + 1}): {message.content}")
 
             if tool_calls:
-                tool_call = tool_calls[0]
-                function_name = tool_call.function.name
-                function_args = tool_call.function.arguments
-                logging.info(f"Function Name: {function_name}, Arguments: {function_args}")
+                search_queries = [] # Collect search queries
+                
+                for tool_call in tool_calls: # Iterate through all tool calls
+                    function_name = tool_call.function.name
+                    function_args = tool_call.function.arguments
+                    logging.info(f"Function Name: {function_name}, Arguments: {function_args}")
 
-                try:
                     if function_name == "AnswerQuestion":
                         logging.info(f"AnswerQuestion function_args: {function_args}") # ADDED LOGGING
                         answer_data = AnswerQuestion.model_validate_json(function_args)
@@ -234,30 +235,43 @@ def process_response(response, user_question, model_choice):
                     elif function_name == "tavily_search_results_json":
                         try:
                             query = eval(function_args)['query']
-                            search_results = tavily_search.run(query)
-                            if search_results and isinstance(search_results, list):
-                                # Concatenate the content of all search results
-                                combined_content = "\n".join([result.get("content", "") for result in search_results if isinstance(result, dict)])
-                                logging.info(f"Search Results: {combined_content}")
-                                # Include the user's question and search results in the messages sent to the OpenAI API
-                                messages = [
-                                    {"role": "user", "content": user_question},
-                                    {"role": "assistant", "content": f"Search results: {combined_content}"}
-                                ]
-                                response = get_openai_response(
-                                    messages, model_choice, use_revise_answer
-                                )
-                                if response and response.choices and response.choices[0].message:
-                                    assistant_text = response.choices[0].message.content or ""
-                                else:
-                                    assistant_text = "Could not synthesize the information."
-                            else:
-                                assistant_text = "\n\nCould not find relevant information in search results."
+                            search_queries.append(query) # Collect queries for batch search
                         except Exception as e:
                             assistant_text += f"\n\nError processing tool call: {function_name} - {str(e)}"
                             logging.error(f"Error processing tool call: {function_name} - {str(e)}")
                     else:
                         assistant_text += f"\n\nUnknown function: {function_name}"
+
+                if search_queries:
+                    combined_content = ""
+                    for query in search_queries:
+                        search_results = tavily_search.run(query)
+                        if search_results and isinstance(search_results, list):
+                            # Concatenate the content of all search results
+                            combined_content += "\n".join([result.get("content", "") for result in search_results if isinstance(result, dict)])
+                            logging.info(f"Search Results for query '{query}': {combined_content}")
+                        else:
+                            assistant_text += f"\n\nCould not find relevant information in search results for query: {query}"
+
+                    if combined_content:
+                        # Include the user's question and combined search results in the messages
+                        messages = [
+                            {"role": "user", "content": user_question},
+                            {"role": "assistant", "content": f"Search results: {combined_content}"}
+                        ]
+                        response = get_openai_response(
+                            messages, model_choice, use_revise_answer
+                        )
+                        if response and response.choices and response.choices[0].message:
+                            # Extract content from the final response
+                            message_content = response.choices[0].message.content
+                            assistant_text = message_content if message_content else "Could not synthesize information from search results."
+                        else:
+                            assistant_text = "Could not synthesize the information."
+                    else:
+                        assistant_text = "\n\nCould not find relevant information in search results."
+
+
                 except Exception as e:
                     assistant_text += f"\n\nError processing tool call: {str(e)}"
                     logging.error(f"Error processing tool call: {str(e)}")
