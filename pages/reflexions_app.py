@@ -70,10 +70,10 @@ class BraveSearchResults:
                         "content": result.get("description", ""),
                         "score": 1.0  # Brave doesn't provide a score, using default
                     })
-            return results
+            return results if results else []
         except Exception as e:
             logging.error(f"Brave Search API error: {str(e)}")
-            return None
+            return []
 
 # Define iteration limits
 answer_iterations_limit = 3
@@ -203,8 +203,7 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
         logging.info("Using cached OpenAI response")
         return st.session_state.response_cache[cache_key]
 
-    search_tool_name = "brave_search_results_json" if st.session_state.get("search_provider", "brave") == "brave" else "tavily_search_results_json"
-
+    search_tool_name = "BraveSearchResults" if st.session_state.get("search_provider", "brave") == "brave" else "TavilySearchResults"
     tools = [
         {
             "type": "function",
