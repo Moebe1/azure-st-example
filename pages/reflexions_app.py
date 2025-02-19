@@ -205,6 +205,7 @@ def process_response(response, user_question, model_choice):
             message = response.choices[0].message
             tool_calls = message.tool_calls or [] # Handle case with no tool_calls
             logging.info(f"LLM Response Content (Iteration {iteration + 1}): {message.content}")
+            logging.info(f"Tool Calls: {tool_calls}") # ADDED LOGGING
 
             if tool_calls:
                 search_queries = [] # Collect search queries
@@ -237,6 +238,7 @@ def process_response(response, user_question, model_choice):
                         except Exception as e:
                             assistant_text += f"\n\nError processing tool call: {function_name} - {str(e)}"
                             logging.error(f"Error processing tool call: {function_name} - {str(e)}")
+                            logging.exception(e) # ADDED LOGGING
                     else:
                         assistant_text += f"\n\nUnknown function: {function_name}"
 
@@ -281,6 +283,7 @@ def process_response(response, user_question, model_choice):
                                             except Exception as e:
                                                 assistant_text += f"\n\nError processing tool call: {function_name} - {str(e)}"
                                                 logging.error(f"Error processing tool call: {function_name} - {str(e)}")
+                                                logging.exception(e) # ADDED LOGGING
                                         elif function_name == "AnswerQuestion":
                                             answer_data = AnswerQuestion.model_validate_json(function_args)
                                             assistant_text = answer_data.answer
