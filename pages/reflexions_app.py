@@ -449,6 +449,9 @@ def main():
             {"role": "assistant", "content": "Hello! How can I assist you today?"}
         ]
     
+    if "response_cache" not in st.session_state:
+        st.session_state["response_cache"] = {}
+    
     if "search_provider" not in st.session_state:
         st.session_state["search_provider"] = "brave"  # Set default search provider
         
