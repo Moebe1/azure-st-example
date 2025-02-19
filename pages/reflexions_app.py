@@ -152,7 +152,7 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
         response = client.chat.completions.create(
             model=model_name,
             messages=messages,
-            stream=True,
+            stream=False,
             tools=tools,
             tool_choice="auto"
         )
@@ -200,69 +200,146 @@ def process_response(response, user_question, model_choice, status_placeholder):
     iteration = 0
     use_revise_answer = False
     max_iterations = st.session_state.get("max_iterations", 5) # Default to 5 if not set
-    full_response = ""
 
-    # Use st.write_stream to display the streaming response
-    try:
-        for chunk in response:
-            if chunk and chunk.choices and chunk.choices[0].delta:
-                delta = chunk.choices[0].delta
-                if delta.content:
-                    assistant_text = delta.content
-                    full_response += assistant_text
-                    yield assistant_text  # Yield the chunk for streaming
+    while iteration < max_iterations:
+        if response and response.choices and response.choices[0].message:
+            message = response.choices[0].message
+            tool_calls = message.tool_calls or [] # Handle case with no tool_calls
+            logging.info(f"LLM Response Content (Iteration {iteration + 1}): {message.content}")
+            logging.info(f"Tool Calls: {tool_calls}") # ADDED LOGGING
 
-                if delta.tool_calls:
-                    tool_calls = delta.tool_calls
-                    for tool_call in tool_calls:
-                        if tool_call.function:
-                            function_name = tool_call.function.name
-                            function_args = tool_call.function.arguments
-                            logging.info(f"Function Name: {function_name}, Arguments: {function_args}")
-                            status_placeholder.text(f"Using tool: {function_name}")
-                            yield f"Using tool: {function_name}"
+            if tool_calls:
+                search_queries = [] # Collect search queries
+                
+                for tool_call in tool_calls: # Iterate through all tool calls
+                    function_name = tool_call.function.name
+                    function_args = tool_call.function.arguments
+                    logging.info(f"Function Name: {function_name}, Arguments: {function_args}")
+                    status_placeholder.text(f"Using tool: {function_name}")
 
-                            if function_name == "AnswerQuestion":
-                                logging.info(f"AnswerQuestion function_args: {function_args}") # ADDED LOGGING
-                                answer_data = AnswerQuestion.model_validate_json(function_args)
-                                logging.info(f"AnswerQuestion answer_data: {answer_data}") # ADDED LOGGING
-                                assistant_text = answer_data.answer
-                                reflection = answer_data.reflection.dict()
-                                st.session_state["reflections"].append(reflection)
-                                yield assistant_text
+                    if function_name == "AnswerQuestion":
+                        logging.info(f"AnswerQuestion function_args: {function_args}") # ADDED LOGGING
+                        answer_data = AnswerQuestion.model_validate_json(function_args)
+                        logging.info(f"AnswerQuestion answer_data: {answer_data}") # ADDED LOGGING
+                        assistant_text = answer_data.answer
+                        reflection = answer_data.reflection.dict()
+                        st.session_state["reflections"].append(reflection)
 
-                            elif function_name == "ReviseAnswer":
-                                status_placeholder.text(f"Using tool: {function_name}")
-                                yield f"Using tool: {function_name}"
-                                logging.info(f"ReviseAnswer function_args: {function_args}") # ADDED LOGGING
-                                answer_data = ReviseAnswer.model_validate_json(function_args)
-                                logging.info(f"ReviseAnswer answer_data: {answer_data}") # ADDED LOGGING
-                                assistant_text = answer_data.answer
-                                reflection = answer_data.reflection.dict()
-                                st.session_state["reflections"].append(reflection)
-                                yield assistant_text
-                            
-                            elif function_name == "tavily_search_results_json":
-                                status_placeholder.text(f"Using tool: {function_name}")
-                                yield f"Using tool: {function_name}"
-                                try:
-                                    query = eval(function_args)['query']
-                                    yield f"Searching Tavily for: {query}"
-                                except Exception as e:
-                                    assistant_text += f"\n\nError processing tool call: {function_name} - {str(e)}"
-                                    logging.error(f"Error processing tool call: {function_name} - {str(e)}")
-                                    logging.exception(e) # ADDED LOGGING
-                                    yield assistant_text
+                    elif function_name == "ReviseAnswer":
+                        status_placeholder.text(f"Using tool: {function_name}")
+                        logging.info(f"ReviseAnswer function_args: {function_args}") # ADDED LOGGING
+                        answer_data = ReviseAnswer.model_validate_json(function_args)
+                        logging.info(f"ReviseAnswer answer_data: {answer_data}") # ADDED LOGGING
+                        assistant_text = answer_data.answer
+                        reflection = answer_data.reflection.dict()
+                        st.session_state["reflections"].append(reflection)
+                    
+                    elif function_name == "tavily_search_results_json":
+                        status_placeholder.text(f"Using tool: {function_name}")
+                        try:
+                            query = eval(function_args)['query']
+                            search_queries.append(query)
+                        except Exception as e:
+                            assistant_text += f"\n\nError processing tool call: {function_name} - {str(e)}"
+                            logging.error(f"Error processing tool call: {function_name} - {str(e)}")
+                            logging.exception(e) # ADDED LOGGING
+                    else:
+                        assistant_text += f"\n\nUnknown function: {function_name}"
+
+                # Perform batched search if there are any search queries
+                if search_queries:
+                    combined_content = ""
+                    for query in search_queries:
+                        try:
+                            search_results = tavily_search.run(query)
+                            if search_results and isinstance(search_results, list):
+                                # Concatenate the content of all search results
+                                combined_content += "\n".join([result.get("content", "") for result in search_results if isinstance(result, dict)])
+                                logging.info(f"Search Results for query '{query}': {combined_content}")
                             else:
-                                assistant_text += f"\n\nUnknown function: {function_name}"
-                                yield assistant_text
-    except Exception as e:
-        logging.error(f"Error during streaming: {str(e)}")
-        yield f"Error during streaming: {str(e)}"
+                                assistant_text += f"\n\nCould not find relevant information in search results for query: {query}"
+                        except Exception as e:
+                            assistant_text += f"\n\nError during search for query '{query}': {str(e)}"
+                            logging.error(f"Error during search for query '{query}': {str(e)}")
 
-    st.session_state["messages"][-1]["content"] = full_response  # Store the full response
-    logging.info(f"Assistant Text before return: {full_response}") # FIXED LOGGING
-    yield full_response
+                    # Synthesize answer with combined search results
+                    if combined_content:
+                        messages = [
+                            {"role": "user", "content": user_question},
+                            {"role": "assistant", "content": f"Search results: {combined_content}"}
+                        ]
+                        try:
+                            response = get_openai_response(messages, model_choice, use_revise_answer)
+                            if response and response.choices and response.choices[0].message:
+                                message = response.choices[0].message
+                                tool_calls = message.tool_calls or [] # Handle case with no tool_calls
+                                if tool_calls:
+                                    for tool_call in tool_calls:
+                                        logging.info(f"Tool Call Object: {tool_call}")
+                                        logging.info(f"Tool Call Function Object: {tool_call.function}")
+                                        function_name = tool_call.function.name
+                                        function_args = tool_call.function.arguments
+                                        status_placeholder.text(f"Using tool: {function_name}")
+
+                                        if function_name == "tavily_search_results_json":
+                                            try:
+                                                query = eval(function_args)['query']
+                                                search_queries.append(query)
+                                            except Exception as e:
+                                                assistant_text += f"\n\nError processing tool call: {function_name} - {str(e)}"
+                                                logging.error(f"Error processing tool call: {function_name} - {str(e)}")
+                                                logging.exception(e) # ADDED LOGGING
+                                        elif function_name == "AnswerQuestion":
+                                            status_placeholder.text(f"Using tool: {function_name}")
+                                            answer_data = AnswerQuestion.model_validate_json(function_args)
+                                            assistant_text = answer_data.answer
+                                            reflection = answer_data.reflection.dict()
+                                            st.session_state["reflections"].append(reflection)
+                                        elif function_name == "ReviseAnswer":
+                                            status_placeholder.text(f"Using tool: {function_name}")
+                                            answer_data = ReviseAnswer.model_validate_json(function_args)
+                                            assistant_text = answer_data.answer
+                                            reflection = answer_data.reflection.dict()
+                                            st.session_state["reflections"].append(reflection)
+                                        else:
+                                            assistant_text += f"\n\nUnknown function: {function_name}"
+
+                                else:
+                                    assistant_text = message.content or "Could not synthesize information from search results."
+                            else:
+                                assistant_text = "Could not synthesize the information."
+                        except Exception as e:
+                            assistant_text += f"\n\nError synthesizing answer: {str(e)}"
+                            logging.error(f"Error synthesizing answer: {str(e)}")
+                    else:
+                        assistant_text += "\n\nCould not find relevant information in search results."
+            else:
+                assistant_text = message.content or ""
+
+            iteration += 1
+            if iteration < max_iterations:
+                # Determine iteration type and update use_revise_answer accordingly
+                if iteration <= answer_iterations_limit:
+                    iteration_type = "answer"
+                    use_revise_answer = True # Use ReviseAnswer for answer revisions
+                else:
+                    iteration_type = "reflection"
+                    use_revise_answer = False # Do not use ReviseAnswer for reflection iterations, if needed
+
+                # Prepare for the next iteration
+                messages = st.session_state["messages"] + [{"role": "assistant", "content": assistant_text}]
+                response = get_openai_response(messages, model_choice, use_revise_answer=use_revise_answer)
+        else:
+            assistant_text = "Could not get a valid response from the model."
+            break
+
+    if iteration == max_iterations:
+        logging.warning("Maximum iterations reached.")
+
+    logging.info(f"Assistant Text before return: {assistant_text}") # FIXED LOGGING
+    if not assistant_text:
+        assistant_text = "Reached maximum iterations without a final answer."
+    return assistant_text
 
 # =============================================================================
 # Main Streamlit App
@@ -309,28 +386,28 @@ def main():
         status_placeholder = st.empty() # For ephemeral status updates
         assistant_text = ""
 
-    # Initial response
-    if st.session_state["messages"] and st.session_state["messages"][-1]["role"] != "user":
-        st.session_state["messages"].append({"role": "assistant", "content": ""})
+        # Initial response
+        if st.session_state["messages"] and st.session_state["messages"][-1]["role"] != "user":
+            st.session_state["messages"].append({"role": "assistant", "content": ""})
 
-    with st.spinner("Thinking..."):
-        if prompt and prompt.strip():
-            messages = st.session_state["messages"]
-            status_placeholder.text("Generating response...")
-            logging.info("Calling get_openai_response") # ADDED LOGGING
-            response = get_openai_response(messages, model_choice)
-            logging.info("Returned from get_openai_response, calling process_response") # ADDED LOGGING
-            assistant_text = process_response(response, prompt, model_choice, status_placeholder)
-            st.session_state["messages"][-1]["content"] = assistant_text
-        else:
-            assistant_text = ""
+        with st.spinner("Thinking..."):
+            if prompt and prompt.strip():
+                messages = st.session_state["messages"]
+                status_placeholder.text("Generating response...")
+                logging.info("Calling get_openai_response") # ADDED LOGGING
+                response = get_openai_response(messages, model_choice)
+                logging.info("Returned from get_openai_response, calling process_response") # ADDED LOGGING
+                assistant_text = process_response(response, prompt, model_choice, status_placeholder)
+                st.session_state["messages"][-1]["content"] = assistant_text
+            else:
+                assistant_text = ""
 
-        if prompt and prompt.strip():
-            st.write_stream(process_response(response, prompt, model_choice, status_placeholder))
-            status_placeholder.empty() # Clear the status message
-        else:
-            message_placeholder.empty()
-            status_placeholder.empty()
+            if assistant_text:
+                message_placeholder.markdown(assistant_text)
+                status_placeholder.empty() # Clear the status message
+            else:
+                message_placeholder.empty()
+                status_placeholder.empty()
 
         # Display reflections in an expander, outside the chat message
         if len(st.session_state["reflections"]) > 0:
