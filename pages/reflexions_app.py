@@ -317,7 +317,12 @@ def main():
                 st.session_state["messages"].append({"role": "assistant", "content": assistant_text})
                 message_placeholder.markdown(assistant_text)
 
-    # Reflection and revision (removed for simplicity)
+    # Reflection and revision (restored from reference)
+    st.markdown("### Reflections")
+    if "reflections" in st.session_state and len(st.session_state["reflections"]) > 0:
+        for idx, reflection in enumerate(st.session_state["reflections"], start=1):
+            st.markdown(f"**Reflection {idx}:**")
+            st.json(reflection)
 
 if __name__ == "__main__":
     main()
