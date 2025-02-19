@@ -102,11 +102,13 @@ tavily_search = TavilySearchResults(api_key=TAVILY_API_KEY)
 # =============================================================================
 def get_openai_response(messages, model_name, use_revise_answer=False):
     """
-    Gets a response from the OpenAI API, using the AnswerQuestion or ReviseAnswer tool.
+    Gets a response from the OpenAI API.
     """
-    prompt = f"""You are a helpful AI assistant. You have access to the following tool:
+    prompt = f"""You are a helpful AI assistant. You have access to the following tools:
     - tavily_search_results_json: Searches the web and returns results.
-    You must use the tool to answer the question. After using the tool, you MUST synthesize the information into a complete and user-friendly answer.
+    - AnswerQuestion: Provides an answer to the question.
+    - ReviseAnswer: Revises the original answer to the question.
+    You must use the tavily_search_results_json tool to answer the question. After using the tool, you MUST synthesize the information into a complete and user-friendly answer using the AnswerQuestion or ReviseAnswer tool.
     """
     messages = [{"role": "system", "content": prompt}] + messages
 
@@ -127,27 +129,24 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
                     "required": ["query"]
                 }
             }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "AnswerQuestion",
+                "description": "Answer the question. Provide an answer and reflection.",
+                "parameters": AnswerQuestion.model_json_schema(),
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "ReviseAnswer",
+                "description": "Revise your original answer to your question. Provide an answer and reflection.",
+                "parameters": ReviseAnswer.model_json_schema(),
+            }
         }
     ]
-
-    if use_revise_answer:
-        function_name = "ReviseAnswer"
-        function_description = "Revise your original answer to your question. Provide an answer and reflection."
-        parameters = ReviseAnswer.model_json_schema()
-    else:
-        function_name = "AnswerQuestion"
-        function_description = "Answer the question. Provide an answer and reflection."
-        parameters = AnswerQuestion.model_json_schema()
-
-    function_tool = {
-        "type": "function",
-        "function": {
-            "name": function_name,
-            "description": function_description,
-            "parameters": parameters,
-        }
-    }
-    tools.append(function_tool)
 
     try:
         response = client.chat.completions.create(
@@ -160,7 +159,6 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
         logging.info(f"Raw OpenAI API Response: {response.model_dump_json()}") # FIXED LOGGING: Use model_dump_json()
         if response is None: # ADDED LOGGING
             logging.error("OpenAI API response is None") # ADDED LOGGING
-            return None # ADDED LOGGING
         return response
     except OpenAIError as e:
         st.error(f"OpenAI API Error: {str(e)}")
@@ -235,46 +233,66 @@ def process_response(response, user_question, model_choice):
                     elif function_name == "tavily_search_results_json":
                         try:
                             query = eval(function_args)['query']
-                            search_queries.append(query) # Collect queries for batch search
+                            search_queries.append(query)
                         except Exception as e:
                             assistant_text += f"\n\nError processing tool call: {function_name} - {str(e)}"
                             logging.error(f"Error processing tool call: {function_name} - {str(e)}")
                     else:
                         assistant_text += f"\n\nUnknown function: {function_name}"
 
+                # Perform batched search if there are any search queries
                 if search_queries:
                     combined_content = ""
                     for query in search_queries:
-                        search_results = tavily_search.run(query)
-                        if search_results and isinstance(search_results, list):
-                            # Concatenate the content of all search results
-                            combined_content += "\n".join([result.get("content", "") for result in search_results if isinstance(result, dict)])
-                            logging.info(f"Search Results for query '{query}': {combined_content}")
-                        else:
-                            assistant_text += f"\n\nCould not find relevant information in search results for query: {query}"
+                        try:
+                            search_results = tavily_search.run(query)
+                            if search_results and isinstance(search_results, list):
+                                # Concatenate the content of all search results
+                                combined_content += "\n".join([result.get("content", "") for result in search_results if isinstance(result, dict)])
+                                logging.info(f"Search Results for query '{query}': {combined_content}")
+                            else:
+                                assistant_text += f"\n\nCould not find relevant information in search results for query: {query}"
+                        except Exception as e:
+                            assistant_text += f"\n\nError during search for query '{query}': {str(e)}"
+                            logging.error(f"Error during search for query '{query}': {str(e)}")
 
+                    # Synthesize answer with combined search results
                     if combined_content:
-                        # Include the user's question and combined search results in the messages
                         messages = [
                             {"role": "user", "content": user_question},
                             {"role": "assistant", "content": f"Search results: {combined_content}"}
                         ]
-                        response = get_openai_response(
-                            messages, model_choice, use_revise_answer
-                        )
-                        if response and response.choices and response.choices[0].message:
-                            # Extract content from the final response
-                            message_content = response.choices[0].message.content
-                            assistant_text = message_content if message_content else "Could not synthesize information from search results."
-                        else:
-                            assistant_text = "Could not synthesize the information."
+                        try:
+                            response = get_openai_response(messages, model_choice, use_revise_answer)
+                            if response and response.choices and response.choices[0].message:
+                                message = response.choices[0].message
+                                tool_calls = message.tool_calls or [] # Handle case with no tool_calls
+                                if tool_calls:
+                                    for tool_call in tool_calls:
+                                        function_name = tool_call.function.name
+                                        function_args = tool_call.function.arguments
+
+                                        if function_name == "AnswerQuestion":
+                                            answer_data = AnswerQuestion.model_validate_json(function_args)
+                                            assistant_text = answer_data.answer
+                                            reflection = answer_data.reflection.dict()
+                                            st.session_state["reflections"].append(reflection)
+                                        elif function_name == "ReviseAnswer":
+                                            answer_data = ReviseAnswer.model_validate_json(function_args)
+                                            assistant_text = answer_data.answer
+                                            reflection = answer_data.reflection.dict()
+                                            st.session_state["reflections"].append(reflection)
+                                        else:
+                                            assistant_text += f"\n\nUnknown function: {function_name}"
+                                else:
+                                    assistant_text = message.content or "Could not synthesize information from search results."
+                            else:
+                                assistant_text = "Could not synthesize the information."
+                        except Exception as e:
+                            assistant_text += f"\n\nError synthesizing answer: {str(e)}"
+                            logging.error(f"Error synthesizing answer: {str(e)}")
                     else:
-                        assistant_text = "\n\nCould not find relevant information in search results."
-
-
-                except Exception as e:
-                    assistant_text += f"\n\nError processing tool call: {str(e)}"
-                    logging.error(f"Error processing tool call: {str(e)}")
+                        assistant_text += "\n\nCould not find relevant information in search results."
             else:
                 assistant_text = message.content or ""
 
@@ -369,6 +387,7 @@ def main():
     # Reflection and revision (restored from reference)
     st.markdown("### Reflections")
     if "reflections" in st.session_state and len(st.session_state["reflections"]) > 0:
+        st.session_state['reflections'] = st.session_state['reflections'][-reflection_iterations_limit:] # Limit reflections to last N
         logging.info(f"st.session_state['reflections']: {st.session_state['reflections']}") # ADDED LOGGING
         for idx, reflection in enumerate(st.session_state["reflections"], start=1):
             st.markdown(f"**Reflection {idx}:**")
