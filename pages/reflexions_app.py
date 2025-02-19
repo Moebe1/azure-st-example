@@ -224,7 +224,7 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
         {
             "type": "function",
             "function": {
-                "name": "brave_search_results_json",
+                "name": "BraveSearchResults",
                 "description": "Retrieve web search results.",
                 "parameters": {
                     "type": "object",
