@@ -273,7 +273,6 @@ def validate_response(response_content):
 def needs_search(question: str) -> bool:
     """Determines if a question requires web search based on its content."""
     no_search_patterns = [
-        r"^what (is|are) the difference",
         r"^explain",
         r"^describe",
         r"^calculate",
