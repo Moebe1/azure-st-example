@@ -12,7 +12,7 @@ import json
 from typing import List, Dict, Any, Optional
 
 class BraveSearchResults:
-    """Tool that queries the Brave Search API."""
+    """Tool that queries the Brave Search API with rate limiting (1 request per second)."""
     
     def __init__(self, api_key: str):
         self.api_key = api_key
@@ -21,15 +21,28 @@ class BraveSearchResults:
             "Accept": "application/json",
         }
         self.base_url = "https://api.search.brave.com/res/v1/web/search"
+        self.last_request_time = 0  # Track the last request time
 
     def run(self, query: str) -> List[Dict[str, Any]]:
-        """Run query through Brave Search and return results."""
+        """Run query through Brave Search and return results with rate limiting."""
         try:
+            # Calculate time since last request
+            current_time = time.time()
+            time_since_last_request = current_time - self.last_request_time
+            
+            # If less than 1 second has passed, sleep for the remaining time
+            if time_since_last_request < 1.0:
+                time.sleep(1.0 - time_since_last_request)
+            
+            # Make the request
             response = requests.get(
                 self.base_url,
                 headers=self.headers,
                 params={"q": query}
             )
+            
+            # Update last request time
+            self.last_request_time = time.time()
             response.raise_for_status()
             data = response.json()
             
