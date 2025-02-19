@@ -81,6 +81,18 @@ client = AzureOpenAI(
     api_version=AZURE_OPENAI_API_VERSION
 )
 
+def get_search_tool():
+    """Returns the appropriate search tool based on user selection."""
+    search_provider = st.session_state.get("search_provider", "brave")
+    
+    if search_provider == "brave":
+        return BraveSearchResults(api_key=BRAVE_SEARCH_API_KEY)
+    elif search_provider == "tavily":
+        return tavily_search
+    else:
+        st.error("Invalid search provider selected. Defaulting to Tavily.")
+        return tavily_search
+
 # =============================================================================
 # Reflexions Agent Components
 # =============================================================================
@@ -303,6 +315,11 @@ def process_response(response, user_question, model_choice, status_placeholder):
     iteration = 0
     use_revise_answer = False
     max_iterations = st.session_state.get("max_iterations", 5)
+
+    # Check if search is needed
+    if not needs_search(user_question):
+        st.info("⚠️ This query did not require a search. If you need real-time data, "
+                "consider switching to Tavily in the sidebar.")
     
     # Initialize search tracking in session state
     if "search_cache" not in st.session_state:
@@ -381,20 +398,28 @@ def process_response(response, user_question, model_choice, status_placeholder):
                             else:
                                 logging.info(f"Cache miss - making new request for query: {query}")
                                 st.session_state.search_requests_made.add(query)
-                                search_tool = get_search_tool()  # Get current search tool with fallback
+                                search_tool = get_search_tool()  # Get current search tool
                                 search_results = search_tool.run(query)
+
                                 if search_results and isinstance(search_results, list):
                                     st.session_state.search_cache[query] = search_results
                                     st.session_state.search_cache_timestamps[query] = time.time()
                                     st.session_state.search_requests_made.add(query)
+                                else:
+                                    raise ValueError("No valid search results returned.")
                             
                             if search_results and isinstance(search_results, list):
                                 combined_content += "\n".join([result.get("content", "") for result in search_results])
                             else:
                                 assistant_text += f"\n\nNo relevant information found for query: {query}"
                         except Exception as e:
-                            assistant_text += f"\n\nError during search for query '{query}': {str(e)}"
                             logging.error(f"Error during search for query '{query}': {str(e)}")
+                            
+                            # Alert user and suggest switching providers
+                            st.warning(f"Search provider '{st.session_state.search_provider}' failed. "
+                                     "Try switching to Tavily in the sidebar settings.")
+                            
+                            assistant_text += f"\n\n⚠️ Search failed using {st.session_state.search_provider}. Try switching to Tavily."
                     
                     if combined_content:
                         messages = [
