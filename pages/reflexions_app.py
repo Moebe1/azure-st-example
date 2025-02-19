@@ -399,24 +399,18 @@ def main():
                     message_placeholder.markdown(assistant_text)
                     status_placeholder.empty() # Clear the status message
 
-                # Display reflections in an expander
-                if len(st.session_state["reflections"]) > 0:
-                    with st.expander("Reflections"):
-                        reflections_output = ""
-                        for i, r in enumerate(st.session_state["reflections"], start=1):
-                            reflections_output += f"**Reflection {i}:**  \n- Missing: {r.get('missing','')}  \n- Superfluous: {r.get('superfluous','')}  \n---  \n"
-                        # Add reflections to the chat with markdown
-                        st.markdown(reflections_output)
-                        logging.info(f"Reflections Output: {reflections_output}") # ADDED LOGGING
+        # Display reflections in an expander, outside the chat message
+        if len(st.session_state["reflections"]) > 0:
+            with st.expander("Reflections"):
+                reflections_output = ""
+                for i, r in enumerate(st.session_state["reflections"], start=1):
+                    reflections_output += f"**Reflection {i}:**  \n- Missing: {r.get('missing','')}  \n- Superfluous: {r.get('superfluous','')}  \n---  \n"
+                # Add reflections to the chat with markdown
+                st.markdown(reflections_output)
+                logging.info(f"Reflections Output: {reflections_output}") # ADDED LOGGING
 
     # Reflection and revision (restored from reference)
     st.markdown("### Reflections")
-    if "reflections" in st.session_state and len(st.session_state["reflections"]) > 0:
-        st.session_state['reflections'] = st.session_state['reflections'][-reflection_iterations_limit:] # Limit reflections to last N
-        logging.info(f"st.session_state['reflections']: {st.session_state['reflections']}") # ADDED LOGGING
-        for idx, reflection in enumerate(st.session_state["reflections"], start=1):
-            st.markdown(f"**Reflection {idx}:**")
-            st.json(reflection)
 
 if __name__ == "__main__":
     main()
