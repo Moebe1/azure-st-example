@@ -210,7 +210,7 @@ def process_response(response, user_question, model_choice, status_placeholder):
 
             if tool_calls:
                 search_queries = [] # Collect search queries
-                
+                latex_pattern = r"(\(.*?\))" # Regex to find latex expressions
                 for tool_call in tool_calls: # Iterate through all tool calls
                     function_name = tool_call.function.name
                     function_args = tool_call.function.arguments
@@ -339,6 +339,16 @@ def process_response(response, user_question, model_choice, status_placeholder):
     logging.info(f"Assistant Text before return: {assistant_text}") # FIXED LOGGING
     if not assistant_text:
         assistant_text = "Reached maximum iterations without a final answer."
+    
+    # Use st.latex to format mathematical expressions
+    if assistant_text:
+        latex_matches = re.findall(latex_pattern, assistant_text)
+        for match in latex_matches:
+            try:
+                st.latex(match)
+                assistant_text = assistant_text.replace(match, "")
+            except Exception as e:
+                logging.error(f"Error formatting latex: {str(e)}")
     return assistant_text
 
 # =============================================================================
