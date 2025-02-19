@@ -346,7 +346,6 @@ def process_response(response, user_question, model_choice, status_placeholder):
         for match in latex_matches:
             try:
                 st.latex(match)
-                assistant_text = assistant_text.replace(match, "")
             except Exception as e:
                 logging.error(f"Error formatting latex: {str(e)}")
     return assistant_text
