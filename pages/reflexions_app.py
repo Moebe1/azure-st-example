@@ -194,7 +194,7 @@ def validate_response(response_content):
     except OpenAIError as e:
         return False, f"Error during external evaluation: {str(e)}"
 
-def process_response(response, user_question, model_choice):
+def process_response(response, user_question, model_choice, status_placeholder):
     logging.info("Entering process_response function") # ADDED LOGGING
     assistant_text = ""
     iteration = 0
@@ -390,7 +390,7 @@ def main():
                     logging.info("Calling get_openai_response") # ADDED LOGGING
                     response = get_openai_response(messages, model_choice)
                     logging.info("Returned from get_openai_response, calling process_response") # ADDED LOGGING
-                    assistant_text = process_response(response, prompt, model_choice)
+                    assistant_text = process_response(response, prompt, model_choice, status_placeholder)
                 else:
                     assistant_text = ""
 
