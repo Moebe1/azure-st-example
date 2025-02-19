@@ -361,7 +361,7 @@ def main():
         st.header("Configuration")
         model_choice = st.selectbox("Select the Azure deployment:", AVAILABLE_MODELS, index=0)
 
-        max_iterations = st.slider("Max Iterations:", min_value=1, max_value=10, value=5, step=1)
+        max_iterations = st.slider("Max Iterations:", min_value=1, max_value=20, value=5, step=1)
         st.session_state["max_iterations"] = max_iterations
 
         if st.button("Clear Conversation"):
