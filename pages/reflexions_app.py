@@ -373,6 +373,7 @@ def process_response(response, user_question, model_choice, status_placeholder):
                                 if function_args and isinstance(function_args, str):
                                     function_args = json.loads(function_args)  # Ensure it's parsed correctly
                                 query = function_args.get("query", "")
+                                search_queries.append(query)
                             except json.JSONDecodeError:
                                 assistant_text += f"\n\nError: Failed to parse JSON arguments for {function_name}."
                                 logging.error(f"JSON parsing error in {function_name}: {function_args}")
