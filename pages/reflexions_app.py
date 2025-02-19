@@ -8,6 +8,45 @@ from bs4 import BeautifulSoup
 import requests
 import time
 from langchain_community.tools.tavily_search import TavilySearchResults
+import json
+from typing import List, Dict, Any, Optional
+
+class BraveSearchResults:
+    """Tool that queries the Brave Search API."""
+    
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.headers = {
+            "X-Subscription-Token": api_key,
+            "Accept": "application/json",
+        }
+        self.base_url = "https://api.search.brave.com/res/v1/web/search"
+
+    def run(self, query: str) -> List[Dict[str, Any]]:
+        """Run query through Brave Search and return results."""
+        try:
+            response = requests.get(
+                self.base_url,
+                headers=self.headers,
+                params={"q": query}
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            # Extract and format web results
+            results = []
+            if "web" in data and "results" in data["web"]:
+                for result in data["web"]["results"]:
+                    results.append({
+                        "title": result.get("title", ""),
+                        "url": result.get("url", ""),
+                        "content": result.get("description", ""),
+                        "score": 1.0  # Brave doesn't provide a score, using default
+                    })
+            return results
+        except Exception as e:
+            logging.error(f"Brave Search API error: {str(e)}")
+            return None
 
 # Define iteration limits
 answer_iterations_limit = 3
@@ -26,6 +65,7 @@ AZURE_OPENAI_API_KEY = st.secrets["AZURE_OPENAI_API_KEY"]
 AZURE_OPENAI_ENDPOINT = st.secrets["AZURE_OPENAI_ENDPOINT"]
 AZURE_OPENAI_API_VERSION = st.secrets["AZURE_OPENAI_API_VERSION"]
 TAVILY_API_KEY = st.secrets["TAVILY_API_KEY"]
+BRAVE_SEARCH_API_KEY = st.secrets["BRAVE_SEARCH_API_KEY"]
 
 # List of deployments you have in Azure OpenAI
 AVAILABLE_MODELS = [
@@ -121,7 +161,7 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
         
     # Define base prompt
     prompt = f"""You are a helpful AI assistant. You have access to the following tools:
-    - tavily_search_results_json: Searches the web and returns results. Only use this for questions requiring current or factual information.
+    - tavily_search_results_json: Web search using either Brave Search (default) or Tavily with automatic fallback. Only use this for questions requiring current or factual information.
     - AnswerQuestion: Provides an answer to the question.
     - ReviseAnswer: Revises the original answer to the question.
     
@@ -162,7 +202,7 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
             "type": "function",
             "function": {
                 "name": "tavily_search_results_json",
-                "description": "Useful for when you need to answer questions about current events. Input should be a search query.",
+                "description": "Web search using Brave Search (default) or Tavily with automatic fallback. Use for questions requiring current or factual information.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -341,7 +381,8 @@ def process_response(response, user_question, model_choice, status_placeholder):
                             else:
                                 logging.info(f"Cache miss - making new request for query: {query}")
                                 st.session_state.search_requests_made.add(query)
-                                search_results = tavily_search.run(query)
+                                search_tool = get_search_tool()  # Get current search tool with fallback
+                                search_results = search_tool.run(query)
                                 if search_results and isinstance(search_results, list):
                                     st.session_state.search_cache[query] = search_results
                                     st.session_state.search_cache_timestamps[query] = time.time()
@@ -405,6 +446,16 @@ def main():
     with st.sidebar:
         st.header("Configuration")
         model_choice = st.selectbox("Select the Azure deployment:", AVAILABLE_MODELS, index=0)
+        
+        # Search provider selection
+        search_provider = st.selectbox(
+            "Search Provider:",
+            ["brave", "tavily"],
+            index=0 if st.session_state.search_provider == "brave" else 1,
+            key="search_provider_select"
+        )
+        st.session_state.search_provider = search_provider
+        
         max_iterations = st.slider("Max Iterations:", min_value=1, max_value=20, value=5, step=1)
         st.session_state["max_iterations"] = max_iterations
 
