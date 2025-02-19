@@ -112,14 +112,17 @@ client = AzureOpenAI(
 def get_search_tool():
     """Returns the appropriate search tool based on user selection."""
     search_provider = st.session_state.get("search_provider", "brave")
-    
+
     if search_provider == "brave":
+        logging.info("Using Brave Search")
         return BraveSearchResults(api_key=BRAVE_SEARCH_API_KEY)
     elif search_provider == "tavily":
+        logging.info("Using Tavily Search")
         return tavily_search
     else:
-        st.error("Invalid search provider selected. Defaulting to Tavily.")
-        return tavily_search
+        logging.warning("Invalid search provider! Defaulting to Brave Search.")
+        st.session_state["search_provider"] = "brave"  # Enforce consistency
+        return BraveSearchResults(api_key=BRAVE_SEARCH_API_KEY)
 
 # =============================================================================
 # Reflexions Agent Components
@@ -428,14 +431,8 @@ def process_response(response, user_question, model_choice, status_placeholder):
                     for query in unique_queries:
                         # Skip if query was already made in this session
                         if query in st.session_state.search_requests_made:
-                            if query in st.session_state.search_cache:
-                                search_results = st.session_state.search_cache[query]
-                                if search_results and isinstance(search_results, list):
-                                    combined_content += "\n".join([result.get("content", "") for result in search_results])
-                                logging.info(f"Using cached results for query: {query}")
-                            else:
-                                logging.info(f"Reusing previous search for: {query}")
-                                continue  # Prevent unnecessary re-execution
+                            logging.info(f"Skipping duplicate search: {query}")
+                            continue  # Skip re-searching
                         
                         try:
                             if query in st.session_state.search_cache:
