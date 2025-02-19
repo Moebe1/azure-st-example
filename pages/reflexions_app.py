@@ -8,8 +8,11 @@ from bs4 import BeautifulSoup
 import requests
 from langchain_community.tools.tavily_search import TavilySearchResults
 
-# Define the maximum number of iterations for improvement
-max_iterations = 5
+# Define iteration limits
+answer_iterations_limit = 3
+reflection_iterations_limit = 2
+max_iterations = answer_iterations_limit + reflection_iterations_limit # Total max iterations
+iteration_type = "answer" # Start with answer generation
 
 # =============================================================================
 # Suppress Streamlit Debug Messages
@@ -237,10 +240,13 @@ def process_response(response, user_question, model_choice):
                                     {"role": "user", "content": user_question},
                                     {"role": "assistant", "content": f"Search results: {combined_content}"}
                                 ]
-                                # Instead of calling get_openai_response again, synthesize the information directly
-                                # and set assistant_text for this iteration.
-                                assistant_text = "Search results obtained. Now synthesizing answer..." # Provide a placeholder message
-                                    # Further processing to synthesize answer and reflection will happen in the next iterations
+                                response = get_openai_response(
+                                    messages, model_choice, use_revise_answer
+                                )
+                                if response and response.choices and response.choices[0].message:
+                                    assistant_text = response.choices[0].message.content or ""
+                                else:
+                                    assistant_text = "Could not synthesize the information."
                             else:
                                 assistant_text = "\n\nCould not find relevant information in search results."
                         except Exception as e:
@@ -256,10 +262,17 @@ def process_response(response, user_question, model_choice):
 
             iteration += 1
             if iteration < max_iterations:
-                # Prepare for the next iteration, using ReviseAnswer
+                # Determine iteration type and update use_revise_answer accordingly
+                if iteration <= answer_iterations_limit:
+                    iteration_type = "answer"
+                    use_revise_answer = True # Use ReviseAnswer for answer revisions
+                else:
+                    iteration_type = "reflection"
+                    use_revise_answer = False # Do not use ReviseAnswer for reflection iterations, if needed
+
+                # Prepare for the next iteration
                 messages = st.session_state["messages"] + [{"role": "assistant", "content": assistant_text}]
-                response = get_openai_response(messages, model_choice, use_revise_answer=True)
-                use_revise_answer = True # Ensure ReviseAnswer is used in subsequent iterations
+                response = get_openai_response(messages, model_choice, use_revise_answer=use_revise_answer)
         else:
             assistant_text = "Could not get a valid response from the model."
             break
