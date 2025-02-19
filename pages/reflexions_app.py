@@ -427,7 +427,11 @@ def process_response(response, user_question, model_choice, status_placeholder):
                                 logging.info(f"Cache miss - making new request for query: {query}")
                                 st.session_state.search_requests_made.add(query)
                                 search_tool = get_search_tool()  # Get current search tool
-                                search_results = search_tool.run(query)
+                                if search_tool:
+                                    search_results = search_tool.run(query)
+                                else:
+                                    logging.error("No valid search tool found.")
+                                    search_results = []
 
                                 if search_results and isinstance(search_results, list):
                                     st.session_state.search_cache[query] = search_results
