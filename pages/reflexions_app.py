@@ -405,7 +405,12 @@ def process_response(response, user_question, model_choice, status_placeholder):
                                 st.session_state.search_requests_made.add(query)
                                 search_tool = get_search_tool()  # Get current search tool
                                 if search_tool:
-                                    search_results = search_tool.run(query)
+                                    try:
+                                        search_results = search_tool.run(query)
+                                        logging.info(f"Search results for query '{query}': {search_results}")
+                                    except Exception as e:
+                                        logging.error(f"Error invoking search tool: {str(e)}")
+                                        search_results = []
                                 else:
                                     logging.error("No valid search tool found.")
                                     search_results = []
