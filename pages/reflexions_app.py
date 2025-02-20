@@ -277,6 +277,7 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
             }
         })
 
+    print(f"Tools list: {tools}")
     response = get_cached_openai_response(str(messages), model_name, tools)
     if response:
         st.session_state.response_cache[cache_key] = response
@@ -387,6 +388,7 @@ def process_response(response, user_question, model_choice, status_placeholder):
                     function_name = tool_call.function.name
                     function_args = tool_call.function.arguments
                     logging.info(f"Function Name: {function_name}, Arguments: {function_args}")
+                    print(f"Function Name: {function_name}")
                     status_placeholder.text(f"Using tool: {function_name}")
 
                     if function_name == "AnswerQuestion":
