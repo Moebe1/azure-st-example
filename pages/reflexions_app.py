@@ -223,7 +223,9 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
     ]
 
     # Conditionally add the search tool based on user selection
-    if st.session_state.get("search_provider", "brave") == "brave":
+    search_provider = st.session_state.get("search_provider", "brave")
+    print(f"Selected search provider: {search_provider}")
+    if search_provider == "brave":
         tools.append({
             "type": "function",
             "function": {
