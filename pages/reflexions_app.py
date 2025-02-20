@@ -404,9 +404,9 @@ def process_response(response, user_question, model_choice, status_placeholder):
 
                     for query in unique_queries:
                         # Skip if query was already made in this session
-                        if query in st.session_state.search_requests_made:
-                            logging.info(f"Skipping duplicate search: {query}")
-                            continue  # Prevent duplicate searches
+                        #if query in st.session_state.search_requests_made:
+                        #    logging.info(f"Skipping duplicate search: {query}")
+                        #    continue  # Prevent duplicate searches
 
                         try:
                             if query in st.session_state.search_cache:
