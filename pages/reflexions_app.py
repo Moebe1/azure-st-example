@@ -219,23 +219,6 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
                 "description": "Refine and improve the response with additional details if needed.",
                 "parameters": ReviseAnswer.model_json_schema(),
             }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "BraveSearchResults",
-                "description": "Retrieve web search results.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "The search query to use."
-                        }
-                    },
-                    "required": ["query"]
-                }
-            }
         }
     ]
 
@@ -405,24 +388,22 @@ def process_response(response, user_question, model_choice, status_placeholder):
                     search_tool_name = "BraveSearchResults" if st.session_state.get("search_provider") == "brave" \
                   else "TavilySearchResults"
                     if function_name != search_tool_name:
-                        st.error(f"The LLM called function {function_name}, but the selected search provider is {search_tool_name}. Please select {function_name.replace('SearchResults', '')} in the sidebar.")
+                        st.error(f"The LLM called function {function_name}, but the selected search provider is {search_tool_name}. The LLM must use the selected search tool.")
                         continue  # Skip the incorrect search function
-                    elif function_name == search_tool_name:
-                        try:
-                            try:
-                                if function_args and isinstance(function_args, str):
-                                    function_args = json.loads(function_args)  # Ensure it's parsed correctly
-                                query = function_args.get("query", "")
-                                search_queries.append(query)
-                            except json.JSONDecodeError:
-                                assistant_text += f"\n\nError: Failed to parse JSON arguments for {function_name}."
-                                logging.error(f"JSON parsing error in {function_name}: {function_args}")
-                                continue
-                        except Exception as e:
-                            assistant_text += f"\n\nError processing tool call: {function_name} - {str(e)}"
-                            logging.error(f"Error processing tool call: {function_name} - {str(e)}")
-                    else:
-                        assistant_text += f"\n\nUnknown function: {function_name}"
+
+                    try:
+                        if function_args and isinstance(function_args, str):
+                            function_args = json.loads(function_args)  # Ensure it's parsed correctly
+                        query = function_args.get("query", "")
+                        search_queries.append(query)
+                    except json.JSONDecodeError:
+                        assistant_text += f"\n\nError: Failed to parse JSON arguments for {function_name}."
+                        logging.error(f"JSON parsing error in {function_name}: {function_args}")
+                        continue
+                    except Exception as e:
+                        assistant_text += f"\n\nError processing tool call: {function_name} - {str(e)}"
+                        logging.error(f"Error processing tool call: {function_name} - {str(e)}")
+                        pass
 
                 # Process search queries efficiently
                 if search_queries and needs_search(user_question):
@@ -541,7 +522,6 @@ def main():
     with st.sidebar:
         st.header("Configuration")
         model_choice = st.selectbox("Select the Azure deployment:", AVAILABLE_MODELS, index=0)
-        
         # Search provider selection
         search_provider = st.selectbox(
             "Search Provider:",
@@ -549,7 +529,7 @@ def main():
             index=0,  # Default to Brave Search
             key="search_provider_select"
         )
-        st.session_state["search_provider"] = search_provider
+        
         
         max_iterations = st.slider("Max Iterations:", min_value=1, max_value=20, value=5, step=1)
         st.session_state["max_iterations"] = max_iterations
