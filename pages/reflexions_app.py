@@ -296,14 +296,6 @@ def validate_response(response_content):
 
 def needs_search(question: str) -> bool:
     """Determines if a question requires web search based on its content."""
-    no_search_patterns = [
-        r"^explain",
-        r"^describe",
-        r"^calculate",
-        r"\d[\+\-\*\/\=]",
-        r"define .*"
-    ]
-
     search_patterns = [
         r"(latest|recent|current|new|update)",
         r"(in|for|during) \d{4}",
@@ -315,15 +307,11 @@ def needs_search(question: str) -> bool:
         r"weather in"
     ]
 
-    if any(re.search(pattern, question.lower()) for pattern in no_search_patterns):
-        logging.info("Skipping search for general knowledge question.")
-        return False
-
     if any(re.search(pattern, question.lower()) for pattern in search_patterns):
         logging.info("Web search is needed for this query.")
         return True
 
-    return False
+    return True
 
 def process_response(response, user_question, model_choice, status_placeholder):
     """Process the response and handle search queries efficiently."""
@@ -331,7 +319,7 @@ def process_response(response, user_question, model_choice, status_placeholder):
     assistant_text = ""
     iteration = 0
     use_revise_answer = False
-    max_iterations = st.session_state.get("max_iterations", 5)
+    max_iterations = st.session_state.get("max_iterations", 10)
 
     # Check if search is needed
     if not needs_search(user_question):
