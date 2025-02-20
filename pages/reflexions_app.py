@@ -1103,7 +1103,7 @@ tavily_search = TavilySearchResults(api_key=TAVILY_API_KEY)
 # Reflexion Actor Logic
 # =============================================================================
 @st.cache_data(ttl=3600)  # Cache for 1 hour
-def get_cached_openai_response(messages_str, model_name, tools_config):
+def get_cached_openai_response(messages_str, model_name):
     """
     Cached wrapper for OpenAI API calls.
     """
@@ -1112,7 +1112,7 @@ def get_cached_openai_response(messages_str, model_name, tools_config):
             model=model_name,
             messages=eval(messages_str),  # Convert string back to list of dicts
             stream=False,
-            tools=tools_config,
+            tools=tools,
             tool_choice="auto"
         )
         return response
@@ -1194,7 +1194,7 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
 
     # If not in cache, get new response
     try:
-        response = get_cached_openai_response(messages_str, model_name, tools)
+        response = get_cached_openai_response(messages_str, model_name)
         if response is None:
             logging.error("OpenAI API response is None")
             return None
@@ -1476,12 +1476,6 @@ def process_response(response, user_question, model_choice, status_placeholder):
 # Main Streamlit App
 # =============================================================================
 def main():
-    """
-    Note: If you encounter "inotify watch limit reached" error on Linux:
-    1. Check current limits: `cat /proc/sys/fs/inotify/max_user_watches`
-    2. Increase the limit temporarily: `sudo sysctl fs.inotify.max_user_watches=524288`
-    3. Make it permanent: Add `fs.inotify.max_user_watches=524288` to /etc/sysctl.conf
-    """
     st.set_page_config(page_title="Reflexions Multi-Tool Agent", page_icon="🤖")
     st.title("Reflexions Multi-Tool Agent")
 
