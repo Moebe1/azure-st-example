@@ -119,9 +119,8 @@ def get_search_tool():
         logging.info("Using Tavily Search")
         return tavily_search
     else:
-        logging.warning("Invalid search provider! Defaulting to Brave Search.")
-        st.session_state["search_provider"] = "brave"  # Enforce consistency
-        return BraveSearchResults(api_key=BRAVE_SEARCH_API_KEY)
+        logging.error("Invalid search provider selected.")
+        return None
 
 # =============================================================================
 # Reflexions Agent Components
@@ -501,14 +500,14 @@ def main():
         search_provider = st.selectbox(
             "Search Provider:",
             ["brave", "tavily"],
-            index=0 if st.session_state.get("search_provider", "brave") == "brave" else 1,
+            index=0,  # Default to Brave Search
             key="search_provider_select"
         )
-        st.session_state.search_provider = search_provider
+        st.session_state["search_provider"] = search_provider
         
         max_iterations = st.slider("Max Iterations:", min_value=1, max_value=20, value=5, step=1)
         st.session_state["max_iterations"] = max_iterations
-
+    
         if st.button("Clear Conversation"):
             st.session_state["messages"] = [
                 {"role": "assistant", "content": "Conversation cleared. How can I help you now?"}
