@@ -436,22 +436,11 @@ def process_response(response, user_question, model_choice, status_placeholder):
                             assistant_text += f"\n\n⚠️ Search failed using {st.session_state.search_provider}. Try switching to Tavily."
 
                     if combined_content:
-                        # Format search results for clarity
-                        formatted_results = "\n\n".join(
-                            [f"Title: {result['title']}\nURL: {result['url']}\nContent: {result['content']}"
-                             for result in search_results[:5]]  # Limit to top 5 results
-                        )
                         messages = [
                             {"role": "user", "content": user_question},
-                            {"role": "assistant", "content": f"Search results:\n{formatted_results}"}
+                            {"role": "assistant", "content": f"Search results: {combined_content}"}
                         ]
-                        logging.info(f"Formatted messages passed to LLM: {messages}")
                         response = get_openai_response(messages, model_choice, use_revise_answer=True)
-                        
-                        # Fallback if LLM response is None
-                        if not response or not response.choices or not response.choices[0].message:
-                            logging.warning("LLM failed to generate a response. Returning search results directly.")
-                            return f"Here are the search results:\n{formatted_results}"
             else:
                 assistant_text = message.content or ""
 
