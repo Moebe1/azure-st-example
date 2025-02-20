@@ -438,8 +438,9 @@ def process_response(response, user_question, model_choice, status_placeholder):
                     if combined_content:
                         messages = [
                             {"role": "user", "content": user_question},
-                            {"role": "assistant", "content": f"Search results: {combined_content}"}
+                            {"role": "assistant", "content": f"Search results:\n{combined_content}"}
                         ]
+                        logging.info(f"Messages passed to LLM: {messages}")
                         response = get_openai_response(messages, model_choice, use_revise_answer=True)
             else:
                 assistant_text = message.content or ""
