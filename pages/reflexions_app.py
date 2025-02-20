@@ -1229,8 +1229,6 @@ def validate_response(response_content):
 def needs_search(question: str) -> bool:
     """Determines if a question requires web search based on its content."""
     no_search_patterns = [
-        r"^how (do|does|can|would|should)",  # How-to questions
-        r"^what (is|are) the difference",     # Definition/comparison questions
         r"^explain",                          # Explanatory questions
         r"^describe",                         # Descriptive questions
         r"^calculate",                        # Mathematical questions
@@ -1243,6 +1241,7 @@ def needs_search(question: str) -> bool:
         r"statistics|data|numbers",           # Data-driven questions
         r"price|cost|market",                # Market-related information
         r"news|event",                       # Current events
+        r"weather|forecast",
     ]
     
     for pattern in no_search_patterns:
