@@ -184,7 +184,7 @@ def get_cached_openai_response(messages_str, model_name, tools_config):
             messages=eval(messages_str),
             stream=False,
             tools=tools_config,
-            tool_choice= "BraveSearchResults" if st.session_state.get("search_provider", "brave") == "brave" else "TavilySearchResults"
+            tool_choice= "required"
         )
         return response
     except OpenAIError as e:
