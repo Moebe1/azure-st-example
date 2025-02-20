@@ -238,6 +238,45 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
             }
         }
     ]
+
+    # Conditionally add the search tool based on user selection
+    if st.session_state.get("search_provider", "brave") == "brave":
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": "BraveSearchResults",
+                "description": "Retrieve web search results.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The search query to use."
+                        }
+                    },
+                    "required": ["query"]
+                }
+            }
+        })
+    else:
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": "TavilySearchResults",
+                "description": "Retrieve web search results.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "The search query to use."
+                        }
+                    },
+                    "required": ["query"]
+                }
+            }
+        })
+
     response = get_cached_openai_response(str(messages), model_name, tools)
     if response:
         st.session_state.response_cache[cache_key] = response
@@ -364,7 +403,7 @@ def process_response(response, user_question, model_choice, status_placeholder):
                     search_tool_name = "BraveSearchResults" if st.session_state.get("search_provider") == "brave" \
                   else "TavilySearchResults"
                     if function_name != search_tool_name:
-                        logging.warning(f"Ignoring search call to {function_name}, using {search_tool_name} instead.")
+                        st.error(f"The LLM called function {function_name}, but the selected search provider is {search_tool_name}. Please select {function_name.replace('SearchResults', '')} in the sidebar.")
                         continue  # Skip the incorrect search function
                     elif function_name == search_tool_name:
                         try:
