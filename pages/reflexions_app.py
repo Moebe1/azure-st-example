@@ -516,7 +516,7 @@ def main():
         search_provider = st.selectbox(
             "Search Provider:",
             ["brave", "tavily"],
-            index=0,  # Default to Brave Search
+            index=1,  # Default to Tavily Search
             key="search_provider_select"
         )
         
