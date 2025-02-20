@@ -225,11 +225,11 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
     # Conditionally add the search tool based on user selection
     search_provider = st.session_state.get("search_provider", "brave")
     print(f"Selected search provider: {search_provider}")
-    if search_provider == "brave":
+    if search_provider == "tavily":
         tools.append({
             "type": "function",
             "function": {
-                "name": "BraveSearchResults",
+                "name": "TavilySearchResults",
                 "description": "Retrieve web search results.",
                 "parameters": {
                     "type": "object",
@@ -247,7 +247,7 @@ def get_openai_response(messages, model_name, use_revise_answer=False):
         tools.append({
             "type": "function",
             "function": {
-                "name": "TavilySearchResults",
+                "name": "BraveSearchResults",
                 "description": "Retrieve web search results.",
                 "parameters": {
                     "type": "object",
