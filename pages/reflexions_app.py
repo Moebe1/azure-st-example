@@ -36,8 +36,8 @@ class BraveSearchResults:
                 time_since_last_request = current_time - self.last_request_time
 
                 # If less than 1 second has passed, sleep for the remaining time
-                if time_since_last_request < 1.2:
-                    time.sleep(1.2 - time_since_last_request)
+                if time_since_last_request < 0.833:
+                    time.sleep(0.833 - time_since_last_request)
 
                 # Make the request
                 response = requests.get(
